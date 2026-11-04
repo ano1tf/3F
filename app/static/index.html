@@ -25,11 +25,12 @@
         </svg>
       </span>
       <span class="brand-name">VulnLens</span>
-      <span class="brand-tag">v1.1</span>
+      <span class="brand-tag">v2.0</span>
     </a>
     <nav class="topnav">
+      <button class="nav-btn" id="nav-analyzer" type="button" aria-pressed="true">Analyser</button>
+      <button class="nav-btn" id="nav-dashboard" type="button" aria-pressed="false">Tableau de bord</button>
       <a href="#methode">Méthode</a>
-      <a href="#limites">Limites</a>
       <a href="/docs" target="_blank" rel="noopener">API</a>
     </nav>
   </header>
@@ -61,6 +62,24 @@
             </svg>
           </button>
         </div>
+        <fieldset class="profiles" id="profile-select">
+          <legend class="sr-only">Profil d'analyse</legend>
+          <label class="profile-option">
+            <input type="radio" name="profile" value="quick" checked />
+            <span class="profile-box">
+              <span class="profile-name">Rapide</span>
+              <span class="profile-detail">En-têtes, TLS, cookies, 38 fichiers, DNS</span>
+            </span>
+          </label>
+          <label class="profile-option">
+            <input type="radio" name="profile" value="deep" />
+            <span class="profile-box">
+              <span class="profile-name">Approfondi</span>
+              <span class="profile-detail">Tout + AXFR, sous-domaines, redirections ouvertes</span>
+            </span>
+          </label>
+        </fieldset>
+
         <p id="target-hint" class="hint">
           Domaine ou URL complète. L'outil refuse les adresses internes (localhost, 10.x, 192.168.x).
         </p>
@@ -118,7 +137,9 @@
         <div class="summary-right">
           <div class="severity-grid" id="severity-grid"></div>
           <div class="actions">
-            <button class="btn-ghost" id="export-json" type="button">Télécharger le JSON</button>
+            <button class="btn-ghost" id="export-json" type="button">JSON</button>
+            <button class="btn-ghost" id="export-html" type="button">Rapport HTML</button>
+            <button class="btn-ghost" id="export-sarif" type="button">SARIF</button>
             <button class="btn-ghost" id="copy-md" type="button">Copier le rapport</button>
             <button class="btn-ghost" id="print-report" type="button">Imprimer / PDF</button>
             <button class="btn-ghost" id="new-scan" type="button">Nouvelle analyse</button>
@@ -178,6 +199,57 @@
         <p class="muted small">
           Stocké uniquement dans ce navigateur (aucun envoi au serveur). Clique sur une analyse
           pour rouvrir son rapport.
+        </p>
+      </article>
+    </section>
+
+    <!-- Tableau de bord -->
+    <section id="dashboard" hidden>
+      <div class="dash-head">
+        <div>
+          <h2 class="dash-title">Tableau de bord</h2>
+          <p class="muted" id="dash-subtitle">Historique des analyses enregistrées sur cet instance.</p>
+        </div>
+        <div class="actions">
+          <button class="btn-ghost" id="dash-refresh" type="button">Rafraîchir</button>
+          <button class="btn-primary" id="dash-new" type="button">
+            <span class="btn-label">Nouvelle analyse</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="kpis" id="kpis"></div>
+
+      <article class="panel chart-panel" id="chart-panel" hidden>
+        <div class="panel-head">
+          <h2>Évolution du score</h2>
+          <span class="muted small" id="chart-caption"></span>
+        </div>
+        <div class="chart" id="chart"></div>
+      </article>
+
+      <article class="panel" id="scans-panel">
+        <div class="panel-head">
+          <h2>Analyses enregistrées</h2>
+          <span class="muted small" id="scans-count"></span>
+        </div>
+        <div class="table-wrap">
+          <table class="scans-table">
+            <thead>
+              <tr>
+                <th scope="col">Cible</th>
+                <th scope="col">Date</th>
+                <th scope="col">Profil</th>
+                <th scope="col">Score</th>
+                <th scope="col">Constats</th>
+                <th scope="col"><span class="sr-only">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody id="scans-body"></tbody>
+          </table>
+        </div>
+        <p id="dash-empty" class="muted" hidden>
+          Aucune analyse enregistrée pour l'instant. Lance une analyse pour démarrer l'historique.
         </p>
       </article>
     </section>

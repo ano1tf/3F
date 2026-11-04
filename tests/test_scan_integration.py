@@ -10,14 +10,6 @@ from app import config
 from app.models import ScanReport
 from app.safety import ScanError
 from app.scanner.engine import run_scan
-from tests.fixtures.bad_server import FixtureServer
-
-
-@pytest.fixture()
-def vulnerable_server(monkeypatch):
-    monkeypatch.setattr(config, "ALLOW_PRIVATE_TARGETS", True)
-    with FixtureServer() as server:
-        yield server
 
 
 def test_full_scan_detects_expected_issues(vulnerable_server):

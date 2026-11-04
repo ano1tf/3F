@@ -95,6 +95,7 @@ class ScanReport:
     priorities: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     scan_id: str = ""
+    profile: str = "quick"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -111,5 +112,6 @@ class ScanReport:
             "score_breakdown": self.score_breakdown,
             "priorities": self.priorities,
             "scan_id": self.scan_id,
+            "profile": self.profile,
             "errors": self.errors,
         }

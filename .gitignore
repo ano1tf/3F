@@ -23,3 +23,9 @@ htmlcov/
 *.log
 dist/
 build/
+
+# Base de données locale (historique des analyses)
+data/
+*.db
+*.db-shm
+*.db-wal

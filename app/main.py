@@ -6,14 +6,21 @@ import asyncio
 import json
 import time
 from collections import defaultdict, deque
+from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import (
+    FileResponse,
+    JSONResponse,
+    Response,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import config
+from . import config, db, reporting
 from .models import SEVERITY_LABELS_FR
 from .safety import ScanError, normalize_target
 from .scanner.engine import run_scan
@@ -21,10 +28,17 @@ from .scanner.engine import run_scan
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    await db.init()
+    yield
+
+
 app = FastAPI(
     title=config.APP_NAME,
     version=config.APP_VERSION,
     description="Scanner de vulnérabilités web passif, pour des tests de sécurité autorisés.",
+    lifespan=lifespan,
 )
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
@@ -39,6 +53,10 @@ class ScanRequest(BaseModel):
     authorized: bool = Field(
         False,
         description="Confirme que l'utilisateur est autorisé à tester cette cible.",
+    )
+    profile: Literal["quick", "deep"] = Field(
+        "quick",
+        description="`quick` : contrôles passifs standards. `deep` : + AXFR, sous-domaines, redirections ouvertes.",
     )
 
 
@@ -83,6 +101,18 @@ async def meta() -> dict:
         "version": config.APP_VERSION,
         "tagline": config.APP_TAGLINE,
         "user_agent": config.USER_AGENT,
+        "profiles": [
+            {
+                "key": "quick",
+                "label": "Rapide",
+                "detail": "En-têtes, TLS, cookies, CORS, 38 fichiers, contenu, DNS",
+            },
+            {
+                "key": "deep",
+                "label": "Approfondi",
+                "detail": "Tout + transfert de zone, sous-domaines, redirections ouvertes",
+            },
+        ],
         "severities": [
             {"key": sev.value, "label": label, "weight": sev.weight}
             for sev, label in SEVERITY_LABELS_FR.items()
@@ -141,7 +171,10 @@ async def scan(payload: ScanRequest, request: Request) -> StreamingResponse:
 
         async with _SEMAPHORE:
             task = asyncio.create_task(
-                asyncio.wait_for(run_scan(target, emit), timeout=config.SCAN_DEADLINE_SECONDS)
+                asyncio.wait_for(
+                    run_scan(target, emit, profile=payload.profile),
+                    timeout=config.SCAN_DEADLINE_SECONDS,
+                )
             )
             try:
                 while True:
@@ -152,7 +185,16 @@ async def scan(payload: ScanRequest, request: Request) -> StreamingResponse:
                     except TimeoutError:
                         continue
                     yield item
-                await task
+                report = await task
+                try:
+                    await db.save_scan(report.to_dict(), profile=report.profile)
+                except Exception as exc:  # noqa: BLE001
+                    yield _event(
+                        {
+                            "type": "warning",
+                            "message": f"Rapport non enregistré dans l'historique : {exc}",
+                        }
+                    )
             except TimeoutError:
                 yield _event(
                     {
@@ -181,6 +223,81 @@ async def scan(payload: ScanRequest, request: Request) -> StreamingResponse:
         driver(),
         media_type="application/x-ndjson",
         headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/api/scans")
+async def api_scans(host: str | None = None, limit: int = 50) -> dict:
+    """Historique des analyses enregistrées (les plus récentes d'abord)."""
+    return {"scans": await db.list_scans(host, limit)}
+
+
+@app.get("/api/stats")
+async def api_stats() -> dict:
+    """Indicateurs du tableau de bord : volume, score moyen, tendance, sévérités."""
+    return await db.stats()
+
+
+@app.get("/api/scans/{scan_id}")
+async def api_scan(scan_id: str) -> dict:
+    report = await db.get_scan(scan_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="Analyse introuvable.")
+    return report
+
+
+@app.delete("/api/scans/{scan_id}")
+async def api_delete_scan(scan_id: str) -> dict:
+    deleted = await db.delete_scan(scan_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Analyse introuvable.")
+    return {"deleted": True, "scan_id": scan_id}
+
+
+async def _report_or_404(scan_id: str) -> dict:
+    report = await db.get_scan(scan_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="Analyse introuvable.")
+    return report
+
+
+def _download(content: str, media_type: str, filename: str) -> Response:
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/api/scans/{scan_id}/sarif")
+async def api_scan_sarif(scan_id: str) -> Response:
+    report = await _report_or_404(scan_id)
+    return _download(
+        reporting.dumps_sarif(report), "application/sarif+json", f"vulnlens-{scan_id}.sarif.json"
+    )
+
+
+@app.get("/api/scans/{scan_id}/report.html")
+async def api_scan_html(scan_id: str) -> Response:
+    report = await _report_or_404(scan_id)
+    return _download(reporting.to_html(report), "text/html; charset=utf-8", f"vulnlens-{scan_id}.html")
+
+
+@app.get("/api/scans/{scan_id}/markdown")
+async def api_scan_markdown(scan_id: str) -> Response:
+    report = await _report_or_404(scan_id)
+    return _download(
+        reporting.to_markdown(report), "text/markdown; charset=utf-8", f"vulnlens-{scan_id}.md"
+    )
+
+
+@app.get("/api/scans/{scan_id}/json")
+async def api_scan_json(scan_id: str) -> Response:
+    report = await _report_or_404(scan_id)
+    return _download(
+        json.dumps(report, ensure_ascii=False, indent=2),
+        "application/json",
+        f"vulnlens-{scan_id}.json",
     )
 
 

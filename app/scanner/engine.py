@@ -12,7 +12,7 @@ from urllib.parse import urlsplit, urlunsplit
 from .. import config
 from ..models import CheckResult, Finding, ScanReport
 from ..safety import ScanError, validate_target
-from . import checks_content, checks_dns, checks_exposure, checks_http, checks_tls
+from . import checks_content, checks_deep, checks_dns, checks_exposure, checks_http, checks_tls
 from .fetcher import Fetcher, same_origin
 from .scoring import (
     compute_breakdown,
@@ -33,6 +33,7 @@ STEPS = [
     ("cors", "Test CORS et méthodes HTTP"),
     ("exposure", "Recherche de fichiers exposés"),
     ("content", "Analyse du contenu et des formulaires"),
+    ("deep", "Contrôles approfondis (AXFR, sous-domaines, redirections)"),
     ("score", "Calcul du score et du rapport"),
 ]
 
@@ -53,12 +54,13 @@ def dedupe(findings: list[Finding]) -> list[Finding]:
     return unique
 
 
-async def run_scan(raw_target: str, emit: Emitter) -> ScanReport:
+async def run_scan(raw_target: str, emit: Emitter, profile: str = "quick") -> ScanReport:
     started = time.perf_counter()
     report = ScanReport(
         target=raw_target.strip(),
         started_at=datetime.now(UTC).isoformat(timespec="seconds"),
         scan_id=uuid.uuid4().hex[:12],
+        profile="deep" if profile == "deep" else "quick",
     )
     percent = 0
 
@@ -228,6 +230,26 @@ async def run_scan(raw_target: str, emit: Emitter) -> ScanReport:
         report.fingerprint.update(checks_exposure.detect_fingerprint(headers_map, response.text))
         if same_origin(target.url, response.url) is False:
             report.fingerprint["redirige_vers"] = response.url
+
+        # ------------------------------------------------------------------
+        # Phase 3 bis — contrôles approfondis (profil « deep » uniquement)
+        # ------------------------------------------------------------------
+        if report.profile == "deep":
+            await advance("deep", 88, "AXFR, sous-domaines et redirections ouvertes")
+            deep_findings: list[Finding] = []
+            try:
+                deep_findings = await checks_deep.run_deep(fetcher, target.host, response.url)
+                checks.append(CheckResult("deep", "Contrôles approfondis", findings=deep_findings))
+            except Exception as exc:  # noqa: BLE001
+                checks.append(
+                    CheckResult(
+                        "deep",
+                        "Contrôles approfondis",
+                        status="error",
+                        detail=f"Phase interrompue : {exc}",
+                    )
+                )
+            findings.extend(deep_findings)
 
         # ------------------------------------------------------------------
         # Phase 4 — score

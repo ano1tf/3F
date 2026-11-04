@@ -41,6 +41,8 @@
   let activeFilter = "all";
   let searchTerm = "";
   let history = [];
+  let dashboardLoaded = false;
+  let dashboardData = { stats: null, scans: [] };
 
   const HISTORY_KEY = "vulnlens.history.v1";
   const HISTORY_MAX = 10;
@@ -187,7 +189,7 @@
       const response = await fetch("/api/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: target, authorized: true }),
+        body: JSON.stringify({ url: target, authorized: true, profile: selectedProfile() }),
       });
 
       if (!response.ok) {
@@ -231,6 +233,9 @@
         }
       }
 
+      if (gotResult) {
+        dashboardLoaded = false;
+      }
       if (!gotResult) {
         if (errorPanel.hidden) {
           showError("L'analyse s'est interrompue sans produire de rapport. Réessaie.");
@@ -704,6 +709,252 @@
     ].join("\n");
   }
 
+  /* ------------------------------- Profil -------------------------------- */
+
+  function selectedProfile() {
+    const checked = document.querySelector('input[name="profile"]:checked');
+    return checked ? checked.value : "quick";
+  }
+
+  /* ------------------------------ Tableau de bord ------------------------- */
+
+  function showView(view) {
+    const isDashboard = view === "dashboard";
+    $("#dashboard").hidden = !isDashboard;
+    document.querySelector(".hero").hidden = isDashboard;
+    $("#method").hidden = isDashboard;
+
+    $("#nav-analyzer").setAttribute("aria-pressed", isDashboard ? "false" : "true");
+    $("#nav-dashboard").setAttribute("aria-pressed", isDashboard ? "true" : "false");
+
+    if (isDashboard) {
+      results.hidden = true;
+      progressPanel.hidden = true;
+      errorPanel.hidden = true;
+      refreshDashboard();
+    } else if (currentReport) {
+      results.hidden = false;
+    }
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function refreshDashboard() {
+    if (dashboardLoaded) {
+      renderDashboard();
+      return;
+    }
+    try {
+      const [statsResponse, scansResponse] = await Promise.all([
+        fetch("/api/stats"),
+        fetch("/api/scans?limit=50"),
+      ]);
+      if (!statsResponse.ok || !scansResponse.ok) throw new Error("API indisponible");
+      dashboardData.stats = await statsResponse.json();
+      dashboardData.scans = (await scansResponse.json()).scans || [];
+      dashboardLoaded = true;
+      renderDashboard();
+    } catch (error) {
+      $("#kpis").innerHTML = "";
+      $("#scans-body").innerHTML = "";
+      $("#dash-empty").hidden = false;
+      $("#dash-empty").textContent = `Historique indisponible : ${error.message}`;
+    }
+  }
+
+  function renderDashboard() {
+    renderKpis(dashboardData.stats || {});
+    renderChart((dashboardData.stats || {}).series || []);
+    renderScansTable(dashboardData.scans || []);
+  }
+
+  function renderKpis(stats) {
+    const kpis = $("#kpis");
+    kpis.innerHTML = "";
+    const severity = stats.severity || {};
+    const cards = [
+      {
+        label: "Analyses",
+        value: String(stats.total_scans || 0),
+        hint: `${(stats.hosts || []).length} cible(s) suivie(s)`,
+      },
+      {
+        label: "Score moyen",
+        value: stats.total_scans ? `${stats.average_score}` : "—",
+        hint: "sur 100, toutes analyses confondues",
+      },
+      {
+        label: "Critiques cumulés",
+        value: String(severity.critical || 0),
+        hint: "à traiter en premier",
+      },
+      {
+        label: "Constats élevés",
+        value: String(severity.high || 0),
+        hint: "durcissement à planifier",
+      },
+    ];
+    cards.forEach((card) => {
+      const node = el("div", "kpi");
+      node.appendChild(el("div", "kpi-label", card.label));
+      node.appendChild(el("div", "kpi-value", card.value));
+      node.appendChild(el("div", "kpi-hint", card.hint));
+      kpis.appendChild(node);
+    });
+  }
+
+  function renderChart(series) {
+    const panel = $("#chart-panel");
+    const container = $("#chart");
+    container.innerHTML = "";
+    if (!series || series.length < 2) {
+      panel.hidden = true;
+      return;
+    }
+    panel.hidden = false;
+
+    const W = 640;
+    const H = 180;
+    const pad = 26;
+    const n = series.length;
+    const x = (i) => pad + (i / (n - 1)) * (W - pad * 2);
+    const y = (score) => pad + ((100 - score) / 100) * (H - pad * 2);
+
+    const points = series.map((item, index) => [x(index), y(item.score)]);
+    const line = points.map(([px, py], index) => `${index === 0 ? "M" : "L"}${px.toFixed(1)},${py.toFixed(1)}`).join(" ");
+    const area = `${line} L${x(n - 1).toFixed(1)},${H - pad} L${pad},${H - pad} Z`;
+
+    const grid = [0, 25, 50, 75, 100]
+      .map(
+        (value) =>
+          `<line x1="${pad}" y1="${y(value)}" x2="${W - pad}" y2="${y(value)}" stroke="rgba(140,170,210,.14)" stroke-width="1"/>` +
+          `<text x="4" y="${y(value) + 4}" fill="#66788f" font-size="9" font-family="ui-monospace,monospace">${value}</text>`
+      )
+      .join("");
+
+    const dots = series
+      .map(
+        (item, index) =>
+          `<circle cx="${x(index).toFixed(1)}" cy="${y(item.score).toFixed(1)}" r="3.4" fill="#22d3ee" stroke="#0a1120" stroke-width="1.5">` +
+          `<title>${escapeHtml(item.host)} — ${item.score}/100</title></circle>`
+      )
+      .join("");
+
+    container.innerHTML = `
+      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Évolution du score">
+        <defs>
+          <linearGradient id="chart-line" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#a78bfa"/>
+          </linearGradient>
+          <linearGradient id="chart-area" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="rgba(34,211,238,.28)"/><stop offset="1" stop-color="rgba(34,211,238,0)"/>
+          </linearGradient>
+        </defs>
+        ${grid}
+        <path d="${area}" fill="url(#chart-area)" />
+        <path d="${line}" fill="none" stroke="url(#chart-line)" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+        ${dots}
+      </svg>`;
+
+    const last = series[series.length - 1];
+    const first = series[0];
+    const delta = last.score - first.score;
+    const sign = delta > 0 ? "+" : "";
+    $("#chart-caption").textContent =
+      `${n} analyses · dernier score ${last.score}/100 · ${sign}${delta} pts depuis la première`;
+  }
+
+  function renderScansTable(scans) {
+    const body = $("#scans-body");
+    body.innerHTML = "";
+    $("#scans-count").textContent = `${scans.length} analyse(s)`;
+    $("#dash-empty").hidden = scans.length > 0;
+
+    scans.forEach((scan) => {
+      const row = document.createElement("tr");
+      row.appendChild(el("td", "scan-host", scan.host));
+      row.appendChild(el("td", "scan-date", formatDate(scan.created_at)));
+      const profile = el("td");
+      profile.appendChild(el("span", `scan-profile ${scan.profile === "deep" ? "deep" : ""}`, scan.profile));
+      row.appendChild(profile);
+
+      const scoreCell = el("td");
+      const pill = el("span", "score-pill", `${scan.score}/100`);
+      pill.style.color =
+        scan.score >= 80 ? "#34d399" : scan.score >= 60 ? "#ffd166" : scan.score >= 35 ? "#ff8a3d" : "#ff5c78";
+      scoreCell.appendChild(pill);
+      row.appendChild(scoreCell);
+
+      const counts = scan.counts || {};
+      const critical = counts.critical || 0;
+      const summary = `${scan.findings_count} constat(s)` + (critical ? ` · ${critical} critique(s)` : "");
+      row.appendChild(el("td", "scan-date", summary));
+
+      const actions = el("td");
+      const wrapper = el("div", "row-actions");
+      const open = el("button", "icon-btn", "Ouvrir");
+      open.type = "button";
+      open.addEventListener("click", () => openStoredScan(scan.id));
+      const html = el("button", "icon-btn", "HTML");
+      html.type = "button";
+      html.addEventListener("click", () => window.open(`/api/scans/${scan.id}/report.html`, "_blank"));
+      const sarif = el("button", "icon-btn", "SARIF");
+      sarif.type = "button";
+      sarif.addEventListener("click", () => window.open(`/api/scans/${scan.id}/sarif`, "_blank"));
+      const remove = el("button", "icon-btn danger", "Suppr.");
+      remove.type = "button";
+      remove.addEventListener("click", () => deleteScan(scan.id));
+      wrapper.append(open, html, sarif, remove);
+      actions.appendChild(wrapper);
+      row.appendChild(actions);
+
+      body.appendChild(row);
+    });
+  }
+
+  async function openStoredScan(scanId) {
+    try {
+      const response = await fetch(`/api/scans/${scanId}`);
+      if (!response.ok) throw new Error("Analyse introuvable");
+      const report = await response.json();
+      showView("analyzer");
+      renderReport(report, { fromHistory: true });
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+
+  async function deleteScan(scanId) {
+    if (!window.confirm("Supprimer définitivement cette analyse de l'historique ?")) return;
+    try {
+      const response = await fetch(`/api/scans/${scanId}`, { method: "DELETE" });
+      if (!response.ok) throw new Error("Suppression impossible");
+      dashboardLoaded = false;
+      await refreshDashboard();
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, (char) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    })[char]);
+  }
+
+  /* --------------------------- Exports serveur ---------------------------- */
+
+  function openServerExport(kind) {
+    if (!currentReport || !currentReport.scan_id) {
+      alert("Ce rapport n'est pas enregistré : relance l'analyse pour obtenir les exports serveur.");
+      return;
+    }
+    const paths = {
+      html: `/api/scans/${currentReport.scan_id}/report.html`,
+      sarif: `/api/scans/${currentReport.scan_id}/sarif`,
+    };
+    window.open(paths[kind], "_blank");
+  }
+
   /* -------------------------------- Exports ------------------------------- */
 
   function downloadJson() {
@@ -793,6 +1044,18 @@
 
   form.addEventListener("submit", startScan);
   $("#print-report").addEventListener("click", () => window.print());
+  $("#nav-analyzer").addEventListener("click", () => showView("analyzer"));
+  $("#nav-dashboard").addEventListener("click", () => showView("dashboard"));
+  $("#dash-refresh").addEventListener("click", () => {
+    dashboardLoaded = false;
+    refreshDashboard();
+  });
+  $("#dash-new").addEventListener("click", () => {
+    showView("analyzer");
+    input.focus();
+  });
+  $("#export-html").addEventListener("click", () => openServerExport("html"));
+  $("#export-sarif").addEventListener("click", () => openServerExport("sarif"));
   $("#clear-history").addEventListener("click", clearHistory);
   $("#export-json").addEventListener("click", downloadJson);
   $("#copy-md").addEventListener("click", copyMarkdown);
