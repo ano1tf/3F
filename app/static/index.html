@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VulnLens — scanner de vulnérabilités web</title>
+  <meta name="description" content="Analysez la surface d'attaque d'un site web en un clic : HTTPS, TLS, en-têtes, cookies, CORS, fichiers exposés, DNS. Pour des tests autorisés uniquement." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 2l11 4v9c0 7-4.7 12.6-11 15C9.7 27.6 5 22 5 15V6z' fill='%230b1220'/%3E%3Cpath d='M16 5l8 3v7c0 5.2-3.4 9.4-8 11.4C11.4 24.4 8 20.2 8 15V8z' fill='none' stroke='%2322d3ee' stroke-width='1.6'/%3E%3Ccircle cx='16' cy='14' r='3.4' fill='none' stroke='%23a78bfa' stroke-width='1.6'/%3E%3Cpath d='M18.6 16.6L22 20' stroke='%23a78bfa' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="bg-grid" aria-hidden="true"></div>
+  <div class="bg-glow" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <a class="brand" href="/">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" width="26" height="26">
+          <path d="M16 3l10 3.6v8.6c0 6.5-4.3 11.7-10 13.8-5.7-2.1-10-7.3-10-13.8V6.6z" fill="none" stroke="url(#g1)" stroke-width="1.8"/>
+          <circle cx="15.2" cy="14" r="3.6" fill="none" stroke="url(#g1)" stroke-width="1.8"/>
+          <path d="M18 16.8l3.6 3.6" stroke="url(#g1)" stroke-width="1.8" stroke-linecap="round"/>
+          <defs><linearGradient id="g1" x1="0" y1="0" x2="32" y2="32">
+            <stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#a78bfa"/>
+          </linearGradient></defs>
+        </svg>
+      </span>
+      <span class="brand-name">VulnLens</span>
+      <span class="brand-tag">v1.0</span>
+    </a>
+    <nav class="topnav">
+      <a href="#methode">Méthode</a>
+      <a href="#limites">Limites</a>
+      <a href="/docs" target="_blank" rel="noopener">API</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="hero-badge">
+        <span class="dot"></span> Scanner passif · tests autorisés uniquement
+      </div>
+      <h1>La surface d'attaque de votre site,<br /><span class="grad">en un clic.</span></h1>
+      <p class="hero-sub">
+        Transport, TLS, en-têtes, cookies, CORS, fichiers oubliés, fuites d'information et DNS :
+        un rapport priorisé avec preuves et remédiations en quelques secondes.
+      </p>
+
+      <form id="scan-form" class="scan-form" autocomplete="off" novalidate>
+        <label class="sr-only" for="target">Adresse du site à analyser</label>
+        <div class="input-shell">
+          <svg class="input-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/>
+            <path d="M3 12h18M12 3c2.6 2.6 2.6 15.4 0 18M12 3c-2.6 2.6-2.6 15.4 0 18" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".7"/>
+          </svg>
+          <input id="target" name="target" type="text" inputmode="url" spellcheck="false"
+                 placeholder="exemple.fr" aria-describedby="target-hint" required />
+          <button type="submit" id="scan-btn" class="btn-primary">
+            <span class="btn-label">Analyser</span>
+            <svg class="btn-arrow" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+              <path d="M5 12h13M12.5 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </div>
+        <p id="target-hint" class="hint">
+          Domaine ou URL complète. L'outil refuse les adresses internes (localhost, 10.x, 192.168.x).
+        </p>
+        <label class="consent">
+          <input type="checkbox" id="authorized" />
+          <span>
+            Je confirme être <strong>propriétaire</strong> du site ou disposer d'une
+            <strong>autorisation écrite</strong> pour le tester.
+          </span>
+        </label>
+      </form>
+    </section>
+
+    <!-- Progression -->
+    <section id="progress-panel" class="panel progress-panel" hidden aria-live="polite">
+      <div class="panel-head">
+        <h2>Analyse en cours</h2>
+        <span class="mono" id="progress-target"></span>
+      </div>
+      <div class="progress-track"><div class="progress-bar" id="progress-bar"></div></div>
+      <ol class="steps" id="steps"></ol>
+      <pre class="log mono" id="log"></pre>
+    </section>
+
+    <!-- Erreur -->
+    <section id="error-panel" class="panel error-panel" hidden role="alert">
+      <div class="panel-head">
+        <h2>Analyse impossible</h2>
+      </div>
+      <p id="error-message"></p>
+      <p class="muted">Corrige l'adresse ou réessaie dans un instant.</p>
+    </section>
+
+    <!-- Résultats -->
+    <section id="results" hidden>
+      <article class="panel summary-panel">
+        <div class="summary-left">
+          <div class="gauge" id="gauge">
+            <svg viewBox="0 0 120 120" width="132" height="132" aria-hidden="true">
+              <circle cx="60" cy="60" r="52" class="gauge-track"/>
+              <circle cx="60" cy="60" r="52" class="gauge-fill" id="gauge-fill"/>
+            </svg>
+            <div class="gauge-center">
+              <span class="gauge-score" id="score">–</span>
+              <span class="gauge-grade" id="grade">–</span>
+            </div>
+          </div>
+          <div class="summary-meta">
+            <h2 id="summary-title">Rapport d'analyse</h2>
+            <p class="mono target-url" id="result-target"></p>
+            <p class="muted" id="result-meta"></p>
+          </div>
+        </div>
+        <div class="summary-right">
+          <div class="severity-grid" id="severity-grid"></div>
+          <div class="actions">
+            <button class="btn-ghost" id="export-json" type="button">Télécharger le JSON</button>
+            <button class="btn-ghost" id="copy-md" type="button">Copier le rapport</button>
+            <button class="btn-ghost" id="new-scan" type="button">Nouvelle analyse</button>
+          </div>
+        </div>
+      </article>
+
+      <div class="results-toolbar">
+        <div class="filters" id="filters" role="group" aria-label="Filtrer par sévérité"></div>
+        <label class="search">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.7"/>
+            <path d="M16 16l4.5 4.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+          </svg>
+          <input type="search" id="findings-search" placeholder="Filtrer par mot-clé…" />
+        </label>
+      </div>
+
+      <div id="findings" class="findings"></div>
+      <p id="no-findings" class="panel empty-findings" hidden>
+        Aucun constat pour ce filtre. 🌤️
+      </p>
+
+      <div class="two-col">
+        <article class="panel">
+          <div class="panel-head"><h2>Empreinte technique</h2></div>
+          <dl class="fingerprint" id="fingerprint"></dl>
+        </article>
+        <article class="panel">
+          <div class="panel-head"><h2>Contrôles exécutés</h2></div>
+          <ul class="checks" id="checks"></ul>
+        </article>
+      </div>
+    </section>
+
+    <!-- Méthode / état vide -->
+    <section id="method" class="method">
+      <div class="method-grid">
+        <article class="panel">
+          <div class="panel-head"><h2 id="methode">Ce que l'outil vérifie</h2></div>
+          <ul class="scope-list" id="scope-list"></ul>
+        </article>
+        <article class="panel">
+          <div class="panel-head"><h2 id="limites">Ce que l'outil ne fait pas</h2></div>
+          <ul class="scope-list limits" id="limits-list"></ul>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>
+      <strong>VulnLens</strong> — scanner passif. Aucune exploitation, aucun test destructif.
+      N'analysez que des systèmes pour lesquels vous avez une autorisation.
+    </p>
+    <p class="muted">
+      Références : OWASP WSTG · RFC 9116 · RFC 7208 (SPF) · RFC 7489 (DMARC) · RFC 8659 (CAA)
+    </p>
+  </footer>
+
+  <template id="finding-template">
+    <article class="finding">
+      <button class="finding-head" type="button" aria-expanded="false">
+        <span class="sev-dot" aria-hidden="true"></span>
+        <span class="finding-titles">
+          <span class="finding-title"></span>
+          <span class="finding-cat"></span>
+        </span>
+        <span class="sev-badge"></span>
+        <svg class="chev" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+          <path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+      <div class="finding-body">
+        <p class="finding-desc"></p>
+        <div class="block">
+          <h3>Preuve</h3>
+          <pre class="evidence mono"></pre>
+        </div>
+        <div class="block remediation">
+          <h3>Remédiation</h3>
+          <p class="finding-fix"></p>
+        </div>
+        <a class="reference" target="_blank" rel="noopener noreferrer">Documentation ↗</a>
+      </div>
+    </article>
+  </template>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

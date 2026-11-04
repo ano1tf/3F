@@ -1,509 +1,237 @@
-# 3d-forge v6.2 🎮🟥⚔️🐉📦
+# 🔍 VulnLens
 
-**Moteur Ultra Design, Sculpture Organique SDF `C¹` (`organic.py`), Fidélité Photo → 3D (`photo_to_3d.py`) & Texture PBR photoréaliste pensé en priorité pour Roblox Studio (`SurfaceAppearance` Dual-`1024²` + `Studs` + `< 10k tris` + `Neon` + `Luau`), Unreal Engine 5 (`Lumen` + `ORM` + `DirectX -Y` + `UCX_*`), l'impression 3D `100 % watertight`, l'empaquetage automatique `.zip` (`packager.py`, zéro `preview.html`) et les **textures `4096²` reconstruites** (`render_4k/`, 3 atlas × 7 cartes) — `12 à 25 s` CPU tout compris, zéro GPU requis côté utilisateur et zéro boucle infinie !**
+**Scanner de vulnérabilités web passif — une analyse complète en un clic.**
 
-![Vitrine Technique 3d-forge v5.1 — Ultra Design & Texture Engine](docs/img/v5_1_ultra_showcase.png)
+VulnLens analyse la surface d'attaque exposée par un site : transport, TLS, en-têtes de sécurité,
+cookies, CORS, fichiers oubliés, fuites d'information et configuration DNS. Chaque constat arrive
+avec une **preuve**, une **remédiation** et une **référence**, classé par sévérité, avec un score
+global sur 100.
 
-## 🤖 Prompt pour Agents IA (`Arena / z.ai / GLM / Claude / Cursor / Codex`)
-
-Copie-colle simplement ce bloc dans ton Agent IA (bouton **📋** en haut à droite) et remplace la dernière ligne *(voir aussi [`PROMPT_AGENT_IA.md`](PROMPT_AGENT_IA.md) ; [`AGENTS.md`](AGENTS.md) et [`CLAUDE.md`](CLAUDE.md) sont également chargés automatiquement si tu connectes le repo)* :
-
-```markdown
-Utilise le skill 3D de ce dépôt GitHub : https://github.com/DimalaxYT/3F
-1. Clone le dépôt (s'il n'est pas déjà présent) et installe `requirements.txt` si nécessaire.
-2. Lis impérativement `SKILL.md` et `AUTOCRITIQUE.md` avant d'écrire une seule ligne de code.
-3. RÈGLES D'OR QUALITÉ, FIDÉLITÉ PHOTO & LIVRAISON `.ZIP` :
-   - ZÉRO `preview.html` / serveur WebGL : tous les livrables sont automatiquement empaquetés dans **`exports/<nom>/<nom>.zip`** — livre toujours ce fichier `<nom>.zip` !
-   - SI L'UTILISATEUR FOURNIT UNE PHOTO DE RÉFÉRENCE (`<photo>`) :
-     1) Extrais d'abord le gabarit métrique exact et la vraie palette : `python3 scripts/photo_to_3d.py inspect <photo> -o exports/<nom>_ref --height <H_m>` et lis `exports/<nom>_ref/blueprint_grid.png`.
-     2) Écris `custom_<nom>.py` calibré au millimètre sur les coordonnées `(y, z)` mesurées sur `blueprint_grid.png` (`org.Sculpt`, `org.armored_scutes`, `org.bat_wing`, `org.ridge_spines` ou `scripts/greebles.py`).
-     3) Génère l'asset complet (`python3 scripts/turbo_forge.py custom_<nom>.py -o exports/<nom>`), puis vérifie côte à côte avec `python3 scripts/photo_to_3d.py verify <photo> exports/<nom>/<nom>_game.glb -o exports/<nom>/photo_match.png` !
-   - SANS PHOTO : construis un script `custom_<nom>.py` ultra-détaillé (ou une recette du catalogue `references/recipes.md`), lance `python3 scripts/turbo_forge.py <recette | custom.py> -o exports/<nom>`, inspecte `exports/<nom>/qa_game_sheet.png`, et livre immédiatement **`exports/<nom>/<nom>.zip`** !
-
-Objet demandé : [ÉCRIS TON IDÉE OU JOINS TA PHOTO ICI — ex: génère ce dragon en 3D fidèle à la photo jointe, livré en archive .zip]
-```
-
-
-
-> ### Nouveautés `v6.2` — G36 game-ready (`examples/g36_rifle/`) & recette catalogue `g36`
-> - **Fusil d'assaut Heckler & Koch G36** reproduit aux cotes réelles (998 mm), **30 840 tris** de détail sculpté, **LOD0 9 102 tris**, `47 → 3` draw calls, **10 sockets** gameplay (`muzzle`, `grip`, `optic`, `eject`, `mag`, rails…).
-> - Détails d'identité : **pontet-rail surélevé avec fenêtre triangulaire**, optique point rouge à **réticule émissif** (1 Neon Roblox), crosse pleine à plaque caoutchouc, chargeur courbe 13 sections, **garde-main à évents traversants** + rails bas et latéral, canon + bloc de gaz + hausse à ailes + **flash-hider à dents**, poignée d'armement, défenseur de douilles.
-> - **Recette réutilisable** `scripts/recipes/weapons.py` → `turbo_forge.py g36` : `26/26` gates, `.stl` watertight, `g36.zip`.
-> - Pièges corrigés et documentés : normalisation en place d'un axe partagé (`np.asarray`), `unmerge_vertices()` qui casse l'étanchéité CSG, normales lissées autour des découpes (`crisp()` + loft dense), OOM à `tex_size=4096`.
-> - **`unreal/T_*_N_gl.png`** est désormais exporté à côté de `T_*_N.png` : la polarité `DirectX -Y` redevient vérifiable pixel à pixel (`photo_to_3d.project_photo_pbr` resynchronise la jumelle OpenGL).
-
-> ### Nouveautés `v6.0 → v6.2 — Design 4K : textures `4096²` reconstruites, pas upscalées`
-> - **`render_4k/` — 3 atlas × 7 cartes `4096²`** (`scripts/texture_4k.py`) : `BC`, `N` DirectX, `N_gl` OpenGL, `ORM`, `AO`, `Cavity`, `MatID`. Le détail n'est **jamais** un agrandissement du `1024²` : positions et normales monde sont rastérisées texel par texel sur l'atlas, puis les écailles, plis de membrane et anneaux de kératine sont **recalculés analytiquement** en espace monde (donc sans étirement d'UV), la photo de référence étant reprojetée à `4096²` avec test d'occultation.
-> - **Bug de rastérisation UV corrigé** : `np.nonzero(hit)` renvoie des indices *locaux* à la fenêtre du triangle — la ligne était ré-ancrée sur `ya`, la **colonne jamais sur `xa`**. Tous les triangles peignaient donc dans les ~30 premières colonnes : **couverture `4 %` → `73 %`** (référence `pbr.rasterize_uv_triangles` : `67,5 %`). C'est ce qui produisait les « triangles peints » et les coins pâles.
-> - **Palette procédurale** (`palette_color`) : la couleur vient de l'**orientation monde** (dos `#5c1f10`, flanc `#782814`, ventre `#bd8d4f`, membrane `#8f5433`, kératine) et non plus d'un atlas `1024²` qui n'est qu'un dégradé basse fréquence — fini les aplats « plastique ». Les **scutes ventrales** (`scute_field`) remplacent les écailles sur le dessous, comme sur la photo.
-> - **Pipeline en 3 étapes** (`build` / `render` / `package`) : le bake `4096²` sur 3 atlas tenait `3,9 Go` en un seul passage et se faisait tuer par l'OOM killer. `photo_to_3d.load_scene_light(max_tex=…)` charge désormais les `.glb` sans décoder les atlas pleins (rendu QA `856 Mo`, gates comprises).
-> - **Gates `showcase`** (`gates.py --target showcase`) : `26/26` — dont `maps_4k` (résolution native `4096²`, énergie de gradient `>= 1.08` face à sa version floutée, donc **upscale bilinéaire exclu**, normales et ORM non plats).
-> - **Archive `.zip` dédupliquée** (`packager.py`) : les cartes *dérivées* (`N_gl` = `255 - N`, `AO` = canal R de l'`ORM`) et les PNG identiques octet pour octet ne sont plus embarqués — bundle `177 Mo` au lieu de `249 Mo`, sans perte d'information.
-> - **Roblox reste à `1024²`** (plafond moteur `SurfaceAppearance`) : le 4K vit dans `render_4k/` et `unreal/`, jamais dans `roblox/`.
-
-> ### Nouveautés `v5.2 → v6.0 — Fidélité Photo → 3D, Archive `.zip` Automatique, QA 26 Gates`
-> - **26 gates mesurables** (`scripts/gates.py`) dont `bundle_zip` : budget de tris par cible (`hero`/`ugc`/`print`), cohérence des cartes PBR, anims, normales `DirectX -Y`, silhouette LOD0↔LOD2, UV, structure Luau, budget UCX, néon émissif et intégrité de l'archive `<name>.zip` (**zéro `preview.html`**).
-> - **Reconstruction Fidèle Photo → 3D (`scripts/photo_to_3d.py` + `MAT_REPTILE_SCALES` / `MAT_BELLY_SCUTES` / `MAT_WING_MEMBRANE`)** : extraction automatique du gabarit métrique gradué (`blueprint_grid.png`), de l'aspect `L/H` réel et de la palette sRGB vraie de la photo, écailles reptiliennes organiques mates `1024²`, ailes `org.bat_wing` épaisses sans déchirure QEM, plaques imbriquées `org.armored_scutes`, et vérification côte à côte `photo_match.png` (`IoU` de silhouette).
-> - **`turbo_forge` : ~12 s** — cache d'encodage des textures ré-encodées, colliders convexes réécrits (4,4 s → 70 ms), planche QA rendue en un seul pool (`ssaa=1.5`) et packaging `.zip` instantané (`scripts/packager.py`).
-> - **Confort agent** : `--dry-run` (plan sans exécuter), `--resume` (re-run identique en **0,8 s**), `--gif` (turntable), livraison universelle `.zip`.
-> - **CI visuelle** : `scripts/visual_regression.py` compare l'IoU de silhouette des recettes à un baseline commité — une proportion cassée qui passe tous les tests unitaires échoue ici.
-> - **Qualité de rendu (v5.6-5.7)** : éclairage clé/remplissage réellement contrasté, ombre de contact à deux couches, bloom émissif, vignettage, netteté ; l'usure d'arêtes était déclenchée sur **80 % des sommets** (seuil de courbure trop bas : médiane 0.71) — recalibrée à 40 % ; ajout de variations à grande échelle (dérive de teinte par panneau, poussière verticale) ; le néon perdait son intensité à l'export (glTF borne `emissiveFactor` à 1) — exporté via `KHR_materials_emissive_strength` ; fond plat remplacé par un **cyclorama** (une lame à 0.886 de luminance était invisible sur un fond à 0.99) et trempe du katana remise à l'endroit (le tranchant trempé était plus spéculaire que le corps, ce qui écrasait le `hamon` sous la courbe ACES).
-> - **Modelé (v5.7)** : le vecteur d'intensités clé/remplissage/contre était construit puis **jamais utilisé** — trois lumières quasi égales (3.05 / 2.15 / 1.75) ne sculptaient aucune forme lisse. Le rendu passe en **linéaire** avec **auto-exposition** sur la silhouette et une seule tonemap : la dynamique du pion d'échecs passe de **0.09 à 0.17**. L'albédo reçoit un **budget** (plafond 0.86) sans lequel grain et variations étaient clippés, la crasse est dosée selon la clarté de la matière, et un asset **100 % verre** (`wine_glass`) se construit enfin.
-> - **Dépôt allégé** : `examples/` **174 Mo → 1,1 Mo** dans l'arbre ; les 5 packs lourds restent dans l'historique et se restaurent avec `python3 scripts/fetch_examples.py`.
-
-> ### Nouveautés Majeures `3d-forge v5.1 — Ultra Design & Texture Engine`
-> 1. **Bibliothèque Mécanique Hard-Surface 100 % Étanche (`scripts/greebles.py`)** : `hex_bolt` (empreinte 6-pans creuse BTR), `bolt_array`, `toggle_latch` (loquet à étrier acier cintré `tube_sweep`), `louver_vent` (persiennes d'aération inclinées), `picatinny_rail` (rail cranté MIL-STD-1913), `ribbed_conduit`, `ergonomic_handle` et `corner_armor_cap` — zéro simple boîte cubique sur `sci_fi_crate` (`44` pièces mécaniques profilées -> **`3` Draw Calls** temps réel !).
-> 2. **Peinture Texture Multi-Vues GPU Datacenter à Z-Buffer Exact (`gpu_bridge.py` + `--ai-front/--ai-side/--ai-top`)** : génère des guides orthographiques millimétrés (`ortho_meta.json`), peint les pochoirs industriels (`CARGO BAY 04`, `CR-04`), micro-rayures et joints sur le GPU Datacenter, supprime l'éclairage studio (`delight.py`), puis reprojette dans l'UV avec **test d'occultation Z-buffer par caméra** (zéro bavure sur les faces cachées, couvercle articulé `lid` aligné au sous-pixel !).
-> 3. **Moteur PBR Sémantique 8 Archétypes & Micro-Tissage Analytique `1024²` (`game_ready.py`)** :
->    - **`MAT_RUBBER_POLY`** : garantit `metallic == 0.0` strict sur le caoutchouc/polymère (zéro tache chromée parasite !).
->    - **`MAT_PAINTED_ARMOR` & `MAT_HAZARD_STRIPE`** : préserve 95 % d'émail riche + éclats d'acier ciblés sur `curv > 0.54` + chevrons diagonaux 45° ultra-nets.
->    - **`MAT_TSUKA_WRAP` & `MAT_TAMAHAGANE`** : tressage japonais *tsuka-maki* en soie tressée + nodules de galuchat *samegawa* + ligne de trempe ondulée *notare-choji hamon* évalués analytiquement sur chacun des `1 048 576` pixels !
-> 4. **Mode Haute Densité Texels Roblox Studio (`Blade_1024²` + `Hilt_1024²`) & Redressement UV PCA (`pbr.unwrap`)** : oriente automatiquement les îlots UV le long de leurs axes principaux et offre à la poignée `Hilt` et à la lame `Blade` chacune leur propre `SurfaceAppearance` `1024×1024` dans `<Name>_roblox.glb` (`4×` plus net en vue subjective Roblox tout en restant à `2` Draw Calls et `< 4 100 tris/part` !).
-> 5. **Sculpture Organique `v5.1` Haute Définition (`gpu_sculpt.py`)** : lissage de Taubin préservant le tranchant des cornes/écailles (`6` passes) + normales Mikk bi-bandes micro+méso (`sigma=1.1` & `3.8`) + **`-81,6 %`** de dé-lighting SH mesuré sur `dragon_buste`.
-
-![Vitrine Technique 3d-forge v5.0 — Baseline Précédente](docs/img/v5_game_ready_showcase.png)
-
-> ### Priorité n°1 : **Roblox Studio** (`roblox/`) & **Unreal Engine 5** (`unreal/`) — Profil par défaut `--engine roblox_unreal`
->
-> Chaque génération `--game-ready` produit automatiquement un double pack **100 % prêt à glisser-déposer** qui résout **tous les pièges classiques de Roblox Studio et d'Unreal Engine 5** :
-> - **Pack `roblox/` (Priorité #1 — Plug & Play Roblox Studio `Import 3D`)** :
->   - **`<Name>_roblox.glb` encodé en PNG pur (`webp=False`)** : l'outil **Import 3D** de Roblox Studio ignore `EXT_texture_webp` (qui donne un mesh tout gris) mais lit nativement le PNG embarqué en créant **automatiquement le `MeshPart` + l'objet `SurfaceAppearance` rempli avec ses 4 cartes dès le 1er clic** !
->   - **Échelle exacte en `Studs` Roblox (`1 m = 3,5714 Studs`, soit `1 Stud = 0,28 m`)** : `katana` arrive directement à **`3,50 Studs`** dans la main d'un avatar R15, `sci_fi_crate` à **`3,31 × 2,13 × 1,82 Studs`** à hauteur de taille — **zéro redimensionnement manuel**.
->   - **Respect garanti de la limite stricte `< 10 000 triangles / MeshPart`** (`2 600–4 200 tris` en `LOD0` pour tourner à **60 FPS Mobile + Console + PC**).
->   - **AO Physique cuit directement dans `T_<Name>_ColorMap.png` (`1024×1024`)** : comme `SurfaceAppearance` de Roblox **n'a pas de slot Ambient Occlusion**, `3d-forge` multiplie l'AO géométrique dans `ColorMap` pour donner une profondeur d'ombre digne d'Unreal sous l'éclairage Roblox `Future`, et fournit aussi les 4 PNG séparés (`ColorMap`, `NormalMap` OpenGL `+Y`, `MetalnessMap`, `RoughnessMap`).
->   - **Découpe automatique des parties lumineuses en `Neon_*` + Script Luau `setup_<Name>.lua`** : puisque `SurfaceAppearance` n'a pas de carte Emissive, chaque LED/phare/rune est extrait dans son propre `MeshPart` `Neon_*`, et **`setup_<Name>.lua`** configure automatiquement `Enum.Material.Neon`, les `Attachment`s (`GripAttachment`, `TipAttachment`), un **`HingeConstraint` + `ProximityPrompt [E]`** fonctionnel sur les coffres articulés (`sci_fi_crate`), et **`ConvertToTool()`** en 1 clic sur les armes (`katana`, `sword`) !
-> - **Pack `unreal/` (Priorité #2 — Unreal Engine 5 / UEFN)** :
->   - **`SM_<Name>.glb`** en mètres avec colliders convexes **`UCX_SM_<Name>_00..N`**, sockets `SOCKET_*`, tangentes Mikk **`TANGENT (VEC4)`** et animations `gltf.animations`.
->   - **`T_<Name>_BC.png`** (**Albédo pur De-Lit SANS AO cuit**, pour éviter tout double assombrissement sous **Lumen / GTAO** !) + **`T_<Name>_ORM.png`** (`R=AO, G=Roughness, B=Metallic`) + **`T_<Name>_N.png` DirectX (`-Y` canal vert inversé)**.
-
-![Vitrine Technique 3d-forge v4](docs/img/v4_showcase.png)
-
-![Showcase v3 GPU Mécanique & Armes](docs/img/v3_gpu_showcase.png)
-
-![Catalogue Complet des Recettes Étanches](docs/img/gallery.png)
-
-> **Nouveau dans `3d-forge v5 — AAA Game-Ready Edition` (Assets Temps Réel Réalistes) :**
-> 1. **High-Poly -> Low-Poly Mikk Tangent-Space Baker & Chaîne `LOD0 / LOD1 / LOD2` (`scripts/game_ready.py`)** : projette la géométrie haute densité (`50k–120k tris`, chanfreins CSG, boulons, écailles, AO, courbure) vers un maillage temps réel optimisé (`1.5k–4.2k tris`) dans son repère tangent exact **`TANGENT (VEC4)`**, avec mipmaps dédiés sans couture `LOD0 (1024²)` -> `LOD1 (40%, 512²)` -> `LOD2 (15%, 256²)` et fusion automatique des Draw Calls statiques opaques (**`1 seul Draw Call`** statique + verre + pièces mobiles !).
-> 2. **De-Lighting Physique d'Albédo par Harmoniques Sphériques IRLS (`scripts/delight.py`)** : supprime les ombres directionnelles et reflets studio brûlés des textures générées par IA (`-70 %` de variance directionnelle mesurée sur `dragon_buste`) afin que `BaseColor` réagisse avec un réalisme physique pur sous **Unreal Lumen**, **Unity Ray Tracing** ou un cycle jour/nuit dynamique.
-> 3. **Scans Matériaux GPU Datacenter, Patine Physique 4 Couches & Normal Decals** : grain triplanaire sans couture (`assets/ai_materials/`), usure métallique d'arêtes par courbure (`Curvature Edge Wear`), crasse mate dans les cavités (`Cavity Dirt`), salissure de contact au sol (`World-Z Ground Grime`) et **Normal Stamp Decals** procéduraux (panneaux rainurés et rivets d'acier sans aucun coût triangle).
-> 4. **Profils Multi-Moteurs Clés en Main (`--engine unreal | unity | godot | gltf | all`) & Compression `EXT_texture_webp`** :
->    - **Unreal Engine 5 (`unreal/`)** : `SM_<Name>.glb` avec colliders convexes nommés `UCX_SM_<Name>_00..N` + `T_<Name>_BC.png` (sRGB) + `T_<Name>_ORM.png` (`R=AO, G=Roughness, B=Metallic` linéaire) + **`T_<Name>_N.png` DirectX (`-Y` canal vert inversé)**.
->    - **Unity HDRP / URP (`unity/`)** : prefab `.glb` + `T_<Name>_BaseMap.png` + **`T_<Name>_MaskMap.png` RGBA (`R=Metallic, G=AO, B=Detail, A=Smoothness=1-Roughness`)** + `T_<Name>_NormalGL.png` OpenGL (`+Y`).
->    - **Godot 4 (`godot/`)** : scène `*_godot.glb` intégrant directement les enveloppes de collision `-colonly`, les sockets `SOCKET_*` et les pistes `gltf.animations`.
->    - **Binaire `.glb` compacté (`EXT_texture_webp`)** : purge complète des buffers morts -> **`dragon_buste_LOD2.glb` = `630 tris` en `108 Ko` (`×42` plus léger que le High-Poly !)**.
-> 5. **Colliders Physiques Convexes (`UCX_*`), Sockets Gameplay (`SOCKET_*`) & Animations `gltf.animations`** : décomposition convexe multi-pièces pour PhysX / Chaos / Jolt, points d'attache gameplay (`SOCKET_grip`, `SOCKET_tip`, `SOCKET_lid_latch`, `SOCKET_top_mount`, etc.), animations quaternions standards (`Idle_Action` lue nativement par Unreal, Unity, Godot, Blender et Three.js) et **20e recette `sci_fi_crate`** (caisse de ravitaillement blindée articulée).
-
-### Démarrage Rapide — Pipeline Turbo Express (`10 à 14 s` CPU au lieu de `30+ min` !)
-
-```bash
-# 1. Pipeline Express TOUT-EN-UN (`scripts/turbo_forge.py`) — 1 seule commande = Géométrie + LOD0/1/2 + Roblox + UE5 + QA !
-#    • Katana Dual-1024² (Blade + Hilt) : 67.91 s -> 12.66 s (x5,4 plus rapide !)
-python3 scripts/turbo_forge.py katana --lod0-tris 8200 -o out/katana
-
-#    • Caisse blindée Sci-Fi articulée + Peinture Z-Buffer GPU : 60.54 s -> 20.46 s (x3,0 plus rapide !)
-python3 scripts/turbo_forge.py sci_fi_crate --lod0-tris 3800 --emit-guides -o out/sci_fi_crate
-# puis peinture GPU des guides : generate_image(..., images=[out/sci_fi_crate/ortho_guides/...])
-# et re-run avec --ai-front/--ai-side/--ai-top pointant sur tes peintures
-
-#    • Buste de Dragon 3-Vues GPU -> Sculpture 123k tris + STL étanche + Pack Roblox & UE5 : 102.11 s -> 18.85 s (x5,4 plus rapide !)
-python3 scripts/turbo_forge.py \
-  --front assets/ai_multiview/dragon_front.png \
-  --side  assets/ai_multiview/dragon_side.png \
-  --back  assets/ai_multiview/dragon_back.png \
-  --name dragon_buste --lod0-tris 4800 -o out/dragon_buste
-
-# 2. Objet 3D 100 % inédit écrit par l'IA (`def build() -> mk.Builder`) en 1 seule passe (< 15 s CPU) :
-python3 scripts/turbo_forge.py mon_arme_custom.py --lod0-tris 4200 -o out/mon_arme
-```
-
-<!-- BENCH:START -->
-| asset | high-poly | LOD0 (poids) | LOD1 | LOD2 | draw calls | turbo CPU (indicatif) |
-|---|---|---|---|---|---|---|
-| `katana` | 6,840 tris | **6,516 tris** (896 Ko) | 3,129 tris | 1,721 tris | 10 ➔ 1 | 16.13 s |
-| `sci_fi_crate` | 10,726 tris | **3,656 tris** (1161 Ko) | 1,516 tris | 798 tris | 44 ➔ 3 | 16.22 s |
-<!-- BENCH:END -->
-
-> Mesures reproductibles : `python3 scripts/bench.py` (régénère `docs/bench.json`
-> + cette table) et `python3 scripts/bench.py --check` en CI. Les durées sont
-> indicatives (machine dépendante) ; **tris et octets sont déterministes** et
-> toute dérive doc/code fait échouer la CI. Gain historique v5.1 → v5.1 Turbo :
-> ×3 à ×5,4 sur ces mêmes assets (boucles de critique incluses : ×20+ bout en bout).
-
+> ⚖️ **Usage autorisé uniquement.** N'analysez que des systèmes dont vous êtes propriétaire ou pour
+> lesquels vous disposez d'une autorisation écrite. L'outil refuse les cibles internes, ne tente
+> aucune exploitation et n'envoie aucune charge destructive.
 
 ---
 
-> **Les 5 Piliers Fondateurs de `3d-forge v4` (toujours 100 % actifs et testés) :**
-> 1. **Sculpture Organique 3D propulsée par le GPU Datacenter (`scripts/gpu_sculpt.py`)** : reconstruction SDF elliptique multi-branches sans escaliers ni angles carrés, lissage de Taubin, socle de musée chanfreiné soudé par `manifold3d` (**100 % `watertight`**), de-lighting automatique `delight_albedo_3d` et bake UV `1024²` haute définition.
-> 2. **Catalogue complet de 20 recettes 100 % étanches (`scripts/recipes/`)** : `sci_fi_crate`, `car`, `house`, `tree`, `sword`, `katana`, `motocross`, etc.
-> 3. **Rasteriseur UV NumPy vectorisé `×80` plus rapide (`scripts/pbr.py`)** : `rasterize_uv_triangles` (< `0,35 s` en `1024 × 1024`) + compression PNG/WebP sans coutures.
-> 4. **Verre Cristal Réfractif, Vernis Clearcoat & Visionneuse `preview.html` v2** : extensions officielles glTF 2.0 (`KHR_materials_transmission`, `KHR_materials_ior`, `KHR_materials_clearcoat`, `EXT_texture_webp`), réfraction linéaire + réflexion interne totale (TIR) dans `renderer.py`, et inspecteur WebGL interactif hors-ligne avec **4 éclairages HDRI**, **ombre de contact douce** et **7 canaux techniques**.
-> 5. **Hiérarchie `.glb` articulée & Découpe Plateau Imprimante 3D (`scripts/split_stl.py`)** : pivots d'articulation nommés animés en quaternions standards `gltf.animations`, et découpe automatique des grands modèles pour plateau `256 × 256 × 256 mm` avec tenons/mortaises chanfreinés à jeu paramétrique `0,20 mm`.
+## Sommaire
 
-Là où un service text-to-3D devine une approximation ballonneuse de « une chaise »,
-un agent peut **raisonner** la géométrie — quatre pieds, une assise à 45 cm, un
-dossier incliné — et l'exprimer exactement. 3d-forge fournit l'usine déterministe
-qui transforme ce raisonnement en maillage propre, étanche, texturé PBR, livré en
-GLB / OBJ / STL / USDZ avec photos de toutes les faces — et il impose la même
-discipline qu'un service en ligne : **recherche de références avant, autocritique
-notée après.**
-
-```
-« une épée médiévale rouillée avec pommeau en or »
-        │
-        ▼
- STAGE 0 · recherche web ──────► photos réelles → planche « détails à respecter »
-        │                          + palette mesurée (palette_hints.json)
-        ▼
- L'AGENT DESSINE 3 VUES ───────► face / profil / dessus, peintes par matériaux
-        │                          (sa « synthèse multi-vues », comme Meshy)
-        ▼
-┌────────────────────────────────────────────────────────────┐
-│  MOTEUR DÉTERMINISTE (scripts/, 100 % local)               │
-│  hull visuel → marching cubes → lissage Taubin             │
-│  → décimation (budget triangles) → UV xatlas               │
-│  → textures PBR procédurales (albedo + metallicRoughness   │
-│    + normal, rouille / usure d'arêtes / bandes)            │
-│  → rendus PNG (rasterizer numpy, sans GPU)                 │
-└────────────────────────────────────────────────────────────┘
-        │
-        ▼
- PHOTOS DES 6 FACES + TURNTABLE → AUTOCRITIQUE NOTÉE /10
-        │
-        ├─ note < seuil  ► paufiner : corriger la spec, régénérer, re-critiquer
-        └─ note ≥ seuil  ► LIVRAISON : GLB · OBJ+MTL · STL étanche · USDZ · photos
-```
+- [Ce que l'outil détecte](#ce-que-loutil-détecte)
+- [Ce qu'il ne fait pas](#ce-quil-ne-fait-pas)
+- [Démarrage rapide](#démarrage-rapide)
+- [Docker](#docker)
+- [Configuration](#configuration)
+- [API](#api)
+- [Architecture](#architecture)
+- [Tests](#tests)
+- [Roadmap](#roadmap)
+- [Références](#références)
 
 ---
 
-## Comment ça marche
+## Ce que l'outil détecte
 
-### Le principe : l'agent est le générateur
+| Domaine | Contrôles |
+| --- | --- |
+| **Transport** | HTTPS obligatoire, redirection 301 depuis HTTP, chaîne de redirections |
+| **TLS** | Validité et expiration du certificat, émetteur, TLS 1.0/1.1 acceptés, TLS 1.3, force des suites |
+| **En-têtes** | HSTS (durée, `max-age=0`), CSP (absente, `unsafe-inline`, joker, sans directive de script), X-Frame-Options, `nosniff`, Referrer-Policy, Permissions-Policy, COOP |
+| **Cookies** | `Secure`, `HttpOnly`, `SameSite`, combinaison `SameSite=None` sans `Secure` |
+| **CORS** | Origine reflétée, joker `*`, `Allow-Credentials` dangereux |
+| **Méthodes** | `OPTIONS`/`Allow` exposant PUT, DELETE, TRACE… · méthode TRACE activée |
+| **Fichiers exposés** | `.git/`, `.env*`, `.htaccess`, `web.config`, `Dockerfile`, `docker-compose.yml`, `phpinfo`, `server-status`, Actuator Spring, `.DS_Store`, dumps SQL/ZIP, Composer, npm, Swagger, GraphQL |
+| **Fuite d'information** | Versions serveur/CMS, traces d'erreur (Python, .NET, SQL, PHP, Spring), commentaires HTML sensibles, `robots.txt` bavard, listage de répertoires, absence de `security.txt` |
+| **Contenu** | Contenu mixte, formulaires mot de passe non chiffrés, formulaires vers un domaine tiers, scripts sans SRI, `target=_blank` sans `noopener` |
+| **DNS / e-mail** | SPF (absent, multiple, `+all`, `~all`, `?all`), DMARC (absent, `p=none`), CAA |
 
-Aucun réseau de neurones ne tourne ici — et il n'en faut pas. La répartition des
-rôles est la suivante :
+Chaque brique produit un statut visible dans le rapport (`ok`, `indisponible`, `ignorée`), pour
+qu'une analyse partielle ne soit jamais présentée comme complète.
 
-- **L'agent (le LLM)** raisonne : il décompose l'objet, choisit des dimensions
-  réalistes en mètres, dessine les vues, choisit les matériaux PBR, lance la CLI,
-  **regarde les rendus**, diagnostique les défauts et corrige.
-- **Le code (`scripts/`)** exécute : primitives, CSG manifold, hull visuel,
-  marching cubes, UV, bake de textures, rendus, exports, mesures IoU, QA.
-  Tout est déterministe et reproductible — même prompt, même objet, à l'identique.
+### Notation
 
-C'est exactement l'architecture d'un pipeline text-to-3D moderne, avec le LLM
-branché à la place du modèle de diffusion à **chaque** étape :
+| Sévérité | Pénalité | Signification |
+| --- | --- | --- |
+| Critique | −20 | Exploitable presque directement (dépôt Git, `.env`, CORS + credentials) |
+| Élevée | −8 | Faiblesse sérieuse, souvent exploitable en combinaison |
+| Moyenne | −3 | Durcissement manquant, impact réel mais conditionné |
+| Faible | −1 | Bonne pratique absente, impact limité |
+| Info | 0 | Contexte utile, pas une vulnérabilité |
 
-| Étape Meshy | Équivalent 3d-forge | Qui fait quoi |
-|---|---|---|
-| 1. Représentation interne | Spec JSON : palette PBR + 3 vues ASCII | l'agent écrit, le code valide |
-| 2. Synthèse multi-vues | Dessin cohérent face / profil / dessus | l'agent (c'est son « latent ») |
-| 3. Reconstruction de volume | Hull visuel (intersection d'extrusions) | le code |
-| 4. Nettoyage / retopo | Marching cubes → Taubin → décimation | le code |
-| 5. UV | Unwrap xatlas (coutures auto, atlas) | le code |
-| 6. Textures PBR multi-cartes | Bake procédural reprojété des 3 vues : albedo + metallicRoughness + normal + overlays | le code, palette choisie par l'agent |
-| 7. Vérification de cohérence | IoU silhouette par vue + photos 6 faces + turntable + autocritique notée | le code mesure, **l'agent juge** |
-
-### Stage 0 — la recherche web (obligatoire, non contournable)
-
-Avant toute génération d'un objet nouveau, l'agent doit se raccrocher à la
-réalité — l'équivalent déterministe des données d'entraînement d'un modèle de
-diffusion :
-
-1. **Recherche web** : une requête pour l'objet global, une par détail notable
-   (« pommeau doré gros plan », « gouttière d'épée »), une pour la matière
-   (« texture métal rouillé »).
-2. **Téléchargement de 3–6 images publiques** :
-   `python3 scripts/research.py fetch --urls URL1 URL2 ... --dir refs_raw/`
-3. **Planche des détails à respecter** :
-   `python3 scripts/research.py build --dir refs_raw/ --title "..." --out ... \
-       --queries "..." --notes "pommeau disque doré" "gouttière centrale" ...`
-   → `reference_sheet.png` (vignettes + palettes par image + notes + traçabilité
-   des requêtes) et `palette_hints.json` (couleurs dominantes mesurées,
-   indices metallic/roughness). **Ces notes deviennent le contrat QA** : chaque
-   détail listé doit être visible sur les photos finales, sinon on ne livre pas.
-
-Pas d'accès web dans l'environnement ? L'agent doit le dire explicitement et
-retomber sur ses connaissances internes — sauter l'étape en silence est interdit.
-
-### Quatre workflows selon le point de départ
-
-| Workflow | Quand l'utiliser | Outil |
-|---|---|---|
-| **A — Recettes & Hybride PBR** | l'objet existe dans le catalogue (19 familles paramétriques dont `katana` texturé PBR) ou se compose via `meshkit` + `b.bake_pbr(...)` | `generate.py` / `meshkit.py` |
-| **B — Image → 3D** | l'utilisateur fournit une photo de référence (filtrage auto de l'ombre au sol dans `compare.py`) | `img2mesh.py` + `compare.py` |
-| **C — Génération multi-vues v2** (« Meshy mode ») | formes organiques/forgées : **canevas vectoriel 2D continu** (`spline`, `capsule`, `ellipse`, `poly`) ou ASCII → SDF 3D anisotrope + bake PBR 3 cartes | `meshgen.py` + spec JSON |
-| **D — Multi-parties** (« katana mode ») | objets composites mixant specs `meshgen`, `recipe` et `.glb` générés **en parallèle** avec cache par pièce et union `manifold3d` étanche | `assemble.py` + manifest |
-
-Les workflows se combinent librement : un objet paramétrique `meshkit` précis (`rounded_box`, `loft`, `sweep`) peut recevoir un unwrap `xatlas` + bake PBR complet (`rust`, `wrap` / `diamond` *tsuka-maki*, `hamon`, `wood_grain`, `brushed_metal`, `edge_wear`, `patina` + carte de normales tangentes) via `Builder.bake_pbr(...)`, et `assemble.py` peut mixer pièces paramétriques et pièces SDF multi-vues dans la même scène.
-
-**A — Recettes paramétriques (19 familles, 19/19 étanches)** : chaise, table, tabouret, bibliothèque, lampe, mug, vase (4 formes), bouteille, bol, assiette, verre à pied (profil spline PCHIP + verre multi-couches), pion d'échecs, épée, **katana forgé PBR (`sweep` courbure *sori* + tressage *tsuka-maki* en losanges + *hamon*)**, fusée, maison, arbre, voiture, motocross (154 pièces, union étanche en 0,19 s).
-
-**B — Image → 3D** : segmentation (fond uni détouré dans `research.py` + filtrage automatique de l'ombre portée au sol dans `compare.py`), contour, profil de largeur W(z), construction `revolve` / `extrude` / `loft`, puis scoring **IoU de silhouette** mesh vs photo (ex. motocross KTM : IoU global **0,747**, zone basse **0,794** sans fausse pénalité d'ombre).
-
-**C — Génération multi-vues v2 (`meshgen.py`)** : vues vectorielles 2D continues sans marche d'escalier (`spline`, `poly`, `rect`, `ellipse`, `capsule`, ajourages `void`) ou vues ASCII classiques, grille SDF 3D anisotrope (`dims` + `grid`) préservant les lames de 4–8 mm, unwrap `xatlas`, puis bake PBR glTF 2.0 complet (`baseColorTexture` + `metallicRoughnessTexture` + `normalTexture`). Exemple de référence : [`specs/epee_rouillee.json`](specs/epee_rouillee.json) — 15 000 tris, **étanche**, **IoU moyen = 0,9152** (`face 0,928` · `profil 0,873` · `dessus 0,945`).
-
-### Stage 3 — l'autocritique notée (seuil & budget : `critique.py policy`)
-
-C'est la règle de qualité du skill, appliquée **verbatim** par l'agent après
-chaque génération :
-
-> **Tu t'autocritique sur une note de 1/10. Si la note est inférieure au seuil (`critique.py policy`),
-> continue à paufiner. Sinon, envoie-moi le résultat.**
-
-Le prompt intégral à copier dans le contexte d'un agent vit dans
-[`AUTOCRITIQUE.md`](AUTOCRITIQUE.md), et le code (`critique.py`) structure la
-boucle tout en **empêchant la complaisance mécaniquement** :
-
-```bash
-# 1. BRIEF — la fiche de critique de cette itération
-python3 scripts/critique.py brief --dir out/epee --iter 1
-#    → métriques objectives (IoU par vue, étanchéité, budget), la LISTE des
-#      photos à ouvrir, la checklist des détails Stage 0, le barème /10
-#      (S silhouette 3 · V volume 2 · M matériaux 2 · D détails 2 · T technique 1)
-
-# 2. VERDICT — après avoir VRAIMENT ouvert chaque photo
-python3 scripts/critique.py verdict --dir out/epee --iter 1 \
-    --note 7.2 --justification "proportions ok, détails manquants" \
-    --issue "S|pointe trop fine|mangée par le lissage : res 80->96, smooth 10->7" \
-    --issue "D|gouttière invisible de profil|peindre le fuller dans side aussi"
-#    → REFINE  (note < seuil : corriger, régénérer dans iter_2, re-critiquer)
-#      DELIVER (note ≥ seuil avec --deliver : seulement maintenant on livre)
-
-# 3. STATUS — historique des notes et tendance
-python3 scripts/critique.py status --dir out/epee
-```
-
-Gardes-fous appliqués par le code, pas par la volonté :
-
-- une note ≥ 9.5 **avec des issues ouvertes** est REFUSÉE ;
-- une note < 9.5 **sans aucun issue** est REFUSÉE (le diagnostic est obligatoire) ;
-- IoU moyen < 0.5 ⇒ toute note ≥ 9.5 est impossible ;
-- un 10 donné sans avoir ouvert les photos est de la triche (`critique_log.json`
-  garde la trace) ;
-- budget d'itérations épuisé (défaut 4) → **FORCE_DELIVER** : note finale
-  honnête + issues résiduelles documentées et annoncées. Jamais de faux 9.5.
-
-Chaque itération régénère dans son propre dossier (`out/epee/iter_1/`,
-`iter_2/`, …). Boucle réelle sur l'épée rouillée : notes 5.0 → 6.0 → 8.1 → 7.0
-→ 7.5 → 8.6, et l'autocritique a **découvert un vrai bug moteur** au passage
-(sommets de surface clippés vers le matériau principal, corrigé par
-réattribution nearest-occupied-voxel).
-
-### La boucle de photos : « générer → photographier → corriger »
-
-Chaque génération complète (`--faces all`) produit les **photos des 6 faces**
-(face, dos, gauche, droite, dessus, dessous) + planche contact
-`*_all_faces.png`, et un **turntable 8 angles** + planche. L'agent relit ces
-photos comme on relit la galerie de preview de Meshy : les trois faces
-frontales doivent raconter la même histoire que les trois vues dessinées, et
-chaque détail du Stage 0 doit y être visible. Un détail qu'on ne peut pas
-montrer est un détail qu'on n'a pas construit.
+Score = `100 − Σ(pénalités)` borné à `[0, 100]` → note **A** (≥ 90) à **F** (< 30).
 
 ---
 
-## Installation — qui installe quoi ?
+## Ce qu'il ne fait pas
 
-**Tu veux juste utiliser le skill avec un agent (GLM, Claude…) ? Tu n'installes RIEN.**
-Ton PC reste une simple fenêtre de chat. L'agent fait tout : il récupère le
-skill, installe les dépendances **dans son propre environnement d'exécution**
-(les serveurs où il tourne — pas ta machine), génère l'objet et te rend les
-fichiers. Colle-lui simplement :
+- ❌ Aucune exploitation, aucun payload, aucun shell.
+- ❌ Aucun test d'injection (SQLi, XSS, SSTI…), de force brute ou d'élévation de privilèges.
+- ❌ Aucun test de déni de service ni de fuzzing agressif.
+- ❌ Aucun contournement d'authentification.
 
-> Prends le skill https://github.com/DimalaxYT/3F : télécharge-le dans ton
-> environnement, installe ses dépendances (requirements.txt), puis suis son
-> SKILL.md pour me générer : « une épée médiévale rouillée avec pommeau en or ».
+C'est un outil de **durcissement et de reconnaissance défensive**, pas un outil d'attaque. Pour des
+tests d'intrusion complets et authentifiés, utilisez OWASP ZAP, Burp Suite ou nuclei sur un périmètre
+contractualisé.
 
-**Tu es l'agent (ou un dev qui veut l'exécuter soi-même)** — une seule fois,
-dans l'environnement qui exécute le code :
+---
+
+## Démarrage rapide
+
+Prérequis : Python 3.11+.
 
 ```bash
-git clone https://github.com/DimalaxYT/3F.git
-cd 3F
+git clone <votre-url>/VulnLens && cd VulnLens
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-python3 scripts/detect_env.py    # vérifie l'environnement
+
+uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-Dépendances : `numpy`, `trimesh`, `manifold3d` (CSG étanche), `shapely`
-(extrusions), `pillow`, `scipy`, `scikit-image` (marching cubes), `xatlas` (UV),
-`fast-simplification` (décimation), `matplotlib` (diagnostics image→3D),
-`usd-core` (USDZ natif Pixar).
+Ouvrez ensuite <http://localhost:8000>, saisissez un domaine, cochez la confirmation d'autorisation
+et cliquez sur **Analyser**. Le rapport s'affiche en quelques secondes.
 
-**Aucune clé API, aucun compte, aucun téléchargement de modèle, aucun GPU.**
-Ça tourne sur un CPU de Raspberry Pi comme sur un serveur. Pour vérifier
-l'environnement : `python3 scripts/detect_env.py`.
+Un script `./run.sh` fait la même chose (création du venv, installation, lancement).
 
-## Comment le faire fonctionner
+### Démonstration locale
 
-### 1. En ligne de commande (standalone)
+Un serveur volontairement mal configuré sert de bac à sable :
 
 ```bash
-# cataloguer les recettes et leurs paramètres
-python3 scripts/generate.py --list
+# terminal 1 — cible de test (HTTP, en-têtes absents, .git et .env exposés…)
+python tests/fixtures/bad_server.py
 
-# WORKFLOW A — recette + personnalisation (dimensions en mètres !)
-python3 scripts/generate.py vase --set shape=amphora height=0.35 color="#7a2e1d" \
-    --formats glb obj stl usdz --out ./out
-python3 scripts/generate.py chair --set style=scandinavian wood_color="#b08850" \
-    seat_color="#2c3e70" --faces all --out ./out
-
-# WORKFLOW C — génération multi-vues « Meshy »
-python3 scripts/meshgen.py specs/epee_rouillee.json --out out/epee \
-    --faces all --references out/epee/references
-
-# WORKFLOW B — image → 3D
-python3 scripts/img2mesh.py analyze photo.png --out out/analyze
-python3 scripts/img2mesh.py build out/analyze/analysis.json --mode revolve \
-    --height 0.35 --material ceramic --out out/obj
-python3 scripts/compare.py --mesh out/obj/obj.glb --ref photo.png --axes xz --out out/cmp
-
-# QA
-python3 scripts/validate.py out/vase/vase.stl     # exit 1 si non imprimable
+# terminal 2 — l'outil, avec autorisation des cibles locales
+VULNLENS_ALLOW_PRIVATE=1 uvicorn app.main:app --port 8000
 ```
 
-Chaque génération écrit un dossier `out/<objet>/` : les 4 formats, les rendus
-PNG, les photos de faces, une **`preview.html` interactive autoportante**
-(viewer 3D + GLB embarqué en base64 : double-clic, ça s'ouvre dans n'importe
-quel navigateur, matériaux PBR compris — c'est le « lightweight preview » à
-partager ou à ouvrir pour voir ce que l'IA a fait), et un `report.json`
-(paramètres, triangles, étanchéité, IoU par vue, checklist des détails,
-photos) — **le rapport QA officiel à lire avant de livrer**.
-
-### 2. Comme skill d'agent (Claude, GPT, …)
-
-C'est le mode d'usage principal. Le dépôt est un skill au format standard :
-
-1. Copier le dossier `3d-forge/` dans le répertoire de skills de votre agent
-   (ex. `.claude/skills/3d-forge/`).
-2. L'agent découvre `SKILL.md` (frontmatter + instructions complètes : conven-
-   tions Z-up/mètres, workflows, quality gates, troubleshooting).
-3. Pour la boucle de qualité, ajouter le contenu d'[`AUTOCRITIQUE.md`](AUTOCRITIQUE.md)
-   au contexte — c'est le prompt d'autocritique notée qui impose la règle 9.5.
-4. Demander simplement : *« génère-moi une épée médiévale rouillée avec pommeau
-   en or »* — l'agent enchaîne alors : recherche web → planche des détails →
-   spec 3 vues → meshgen → photos 6 faces → autocritique notée → itérations →
-   livraison, en suivant les 7 quality gates de SKILL.md.
-
-### 3. En bibliothèque Python (géométrie 100 % sur mesure)
-
-Quand aucune recette ne convient, l'agent écrit directement avec `meshkit` —
-c'est le cœur du concept (méthode complète et patterns dans
-[`references/cookbook.md`](references/cookbook.md)) :
-
-```python
-import sys; sys.path.insert(0, "<chemin>/3d-forge/scripts")
-import meshkit as mk
-
-b = mk.Builder("table_basse")
-b.add(mk.box(0.9, 0.5, 0.04), mk.mat.wood("#b08850"), name="plateau", at=(0, 0, 0.42))
-b.add(mk.cylinder(0.025, 0.42), mk.mat.metal("#444a52"), name="pied", at=(0.35, 0.15, 0))
-b.union_solid()
-b.export_glb("table_basse.glb")
-```
-
-### Conventions à connaître
-
-- **Unités** : mètres (un mug fait 0.095 de haut, une porte 2.0).
-- **Axe vertical** : Z (posé au sol, base à z=0). Les GLB sont Z-up — la plupart
-  des viewers importent en Y-up : rotation −90° sur X si besoin.
-- **Face avant** : −Y.
-- **Étanchéité garantie** : toute sortie CSG / lathe / extrude est watertight.
-  Si `validate.py` dit le contraire, le bug est en amont — on répare, on ne
-  livre pas.
+Puis analyser `http://127.0.0.1:<port affiché par le terminal 1>/`.
 
 ---
 
-## Architecture du dépôt
+## Docker
 
-```
-3d-forge/
-├── SKILL.md                  ← point d'entrée agent (workflows, gates, protocoles)
-├── AUTOCRITIQUE.md           ← le prompt de la boucle notée 1–10 / seuil 9.5
-├── PLAN.md                   ← architecture détaillée + roadmap
-├── scripts/
-│   ├── meshkit.py            ← primitives, CSG (manifold3d), lathe, extrude,
-│   │                            matériaux PBR (8 métaux physiques), Builder, OBJ+MTL
-│   ├── meshgen.py            ← WORKFLOW C : vues ASCII → hull → marching cubes
-│   │                            → Taubin → décimation → UV xatlas → bake PBR
-│   ├── assemble.py           ← WORKFLOW D : manifest multi-parties → meshgen
-│   │                            PARALLÈLE par partie → assemblage (GLB groupé,
-│   │                            STL union étanche) — cache par partie pour
-│   │                            itérer « bout par bout »
-│   ├── preview.py            ← preview.html autoportante (model-viewer + GLB
-│   │                            base64 + photos) — un fichier, double-clic
-│   ├── img2mesh.py           ← WORKFLOW B : photo → segmentation → profil → mesh
-│   ├── compare.py            ← IoU silhouette mesh vs photo + overlay par zones
-│   ├── research.py           ← STAGE 0 : fetch images web → planche « détails
-│   │                            à respecter » + palette_hints.json
-│   ├── critique.py           ← STAGE 3 : boucle d'autocritique notée (brief /
-│   │                            verdict / status, gardes anti-complaisance)
-│   ├── renderer.py           ← rasterizer numpy : z-buffer, SSAA 2×, Blinn-Phong
-│   │                            3 lumières, ombre de contact, ACES, 6 faces + turntable
-│   ├── generate.py           ← CLI recettes (--set, --faces all, 4 formats, report)
-│   ├── validate.py           ← QA mesh (étanchéité, volume, composants, dégénérées)
-│   ├── detect_env.py         ← sonde CPU/GPU/dépendances
-│   ├── usdz_export.py        ← USDZ natif (usd-core) + fallback USDA zippé
-│   └── recipes/              ← catalogue 18 recettes (registry + furniture/containers/props)
-├── specs/epee_rouillee.json  ← exemple de référence du workflow C
-├── references/               ← cookbook.md (méthode sur mesure) + materials.md
-├── examples/                 ← exemples légers (CI visuelle) ; packs complets via fetch_examples.py
-├── tests/                    ← pytest : smoke 18/18, meshgen, img2mesh, motocross
-├── evals/evals.json          ← prompts d'évaluation du skill
-├── docs/img/                 ← galerie générée par le pipeline lui-même
-└── neural/                   ← fallback neuronal optionnel (GPU), désactivé par défaut
+```bash
+docker build -t vulnlens .
+docker run --rm -p 8000:8000 vulnlens
 ```
 
-## Exemples
+---
 
-Galerie générée par le pipeline (rendus `three_quarter`, qualité 0.75) :
+## Configuration
 
-![galerie](docs/img/gallery.png)
+Toutes les options passent par des variables d'environnement (voir `app/config.py`).
 
-Des modèles finis vivent dans [`examples/`](examples/) : 3 exemples légers en
-arbre (références de la CI visuelle), packs complets (~174 Mo : katana, épée,
-moto, caisse, dragon) restaurables via `python3 scripts/fetch_examples.py` :
+| Variable | Défaut | Rôle |
+| --- | --- | --- |
+| `VULNLENS_TIMEOUT` | `12` | Délai HTTP par requête (secondes) |
+| `VULNLENS_SCAN_DEADLINE` | `120` | Durée maximale d'une analyse |
+| `VULNLENS_MAX_SCANS` | `1` | Analyses simultanées (le reste est refusé proprement) |
+| `VULNLENS_ALLOW_PRIVATE` | `0` | Autoriser les cibles privées/loopback (**dev uniquement**) |
+| `VULNLENS_CONTACT` | `security@example.org` | Contact publié dans le User-Agent |
+| `VULNLENS_USER_AGENT` | `VulnLens/1.0.0 (+…)` | User-Agent envoyé aux cibles |
 
-| Exemple | Workflow | Points forts |
-|---|---|---|
-| `examples/katana/` *(fetch)* | D — multi-parties | 5 parties vectorielles générées **en parallèle** (`kashira`, `tsuka` losanges *tsuka-maki*, `tsuba` *sukashi* ajourée, `habaki` laiton, `blade` courbée *sori* + *hamon*), **STL union 100 % étanche**, `preview.html` WebGL hors-ligne |
-| `examples/epee_rouillee/` *(fetch)* | C — multi-vues v2 | GLB **texturé PBR** (rouille multi-octaves piquée, normal map tangente, cuir spiralé, pommeau or), **IoU moyen = 0.9152** (`profil = 0.8725`), 6 faces + turntable + `preview.html` hors-ligne |
-| `examples/motocross/` *(fetch)* | A/B — CAD + photo | 154 pièces, moteur & cadre twin-spar en relief 3D, union étanche en **0.19 s**, overlay silhouette sans ombre au sol (`IoU = 0.7468`, bas `0.7936`) |
-| [`examples/chaise_scandinave/`](examples/chaise_scandinave/) · [`vase/`](examples/vase/) · [`rocket/`](examples/rocket/) | A — recettes | paramétrique, STL prêts impression |
+Le refus des adresses internes (RFC 1918, loopback, link-local, métadonnées cloud) est volontaire :
+il empêche l'outil de servir de relais SSRF.
 
-Sorties d'une génération complète d'épée (workflow C + Stage 0 + boucle 9.5) :
-GLB texturé (`albedo` + `metallicRoughness` + `normal` 1024²), OBJ+MTL avec UVs,
-STL étanche, USDZ aligné 64 octets avec textures embarquées, `preview.html`
-WebGL 100 % hors-ligne, planche des 6 faces et turntable 8 angles.
+---
 
-## Pourquoi « sans API » ?
+## API
 
-| | Meshy & co | 3d-forge |
-|---|---|---|
-| Coût | abonnement + crédits | gratuit |
-| Confidentialité | vos prompts partent chez un tiers | 100 % local |
-| Déterminisme | seed à chaque essai | reproductible à l'identique |
-| Éditable | non (mesh opaque) | oui (paramètres + spec + code) |
-| Étanchéité garantie | non | oui (CSG manifold) |
-| Viewer 3D interactif | cloud propriétaire | `preview.html` WebGL PBR **100 % hors-ligne** (0 CDN) |
-| Références réelles | implicites | Stage 0 explicite, fond studio détouré, traçable |
-| Contrôle qualité | un aperçu | photos 6 faces + IoU + note /10 imposée |
-| Temps | ~30 s – 5 min | 0,2 – 90 s |
+L'interface ne fait qu'appeler deux routes.
 
-**Le compromis honnête** : 3d-forge ne sculpte pas d'organique anatomique fin
-(visages humains, drapés libres). Pour du sculptural avec GPU NVIDIA,
-`neural/README.md` documente le branchement d'un fallback local open-source
-(TripoSR, Hunyuan3D, TRELLIS) — le skill fonctionne entièrement sans lui.
+### `GET /api/meta`
+
+Périmètre, limites et barème de sévérité — utilisés par l'UI.
+
+### `POST /api/scan` → flux NDJSON
+
+```bash
+curl -N -X POST http://localhost:8000/api/scan \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://exemple.fr","authorized":true}'
+```
+
+Événements émis, un JSON par ligne :
+
+```jsonc
+{"type":"accepted","target":"https://exemple.fr/"}
+{"type":"progress","step":"headers","label":"Analyse des en-têtes de sécurité","percent":28,"message":"Contrôle des en-têtes (HSTS, CSP, cookies…)"}
+{"type":"result","percent":100,"report":{"score":72,"grade":"C","findings":[…],"checks":[…],"fingerprint":{…}}}
+{"type":"error","code":"private_target","message":"Cible interne bloquée…"}
+```
+
+Codes d'erreur : `empty_target`, `bad_scheme`, `bad_host`, `bad_port`, `credentials_in_url`,
+`dns_failure`, `private_target`, `unreachable`, `busy`, `timeout`, `internal`.
+
+Documentation interactive : <http://localhost:8000/docs>.
+
+---
+
+## Architecture
+
+```
+app/
+├── main.py              # FastAPI : UI statique, streaming NDJSON, quotas
+├── config.py            # réglages + variables d'environnement
+├── models.py            # Finding / CheckResult / ScanReport, sévérités
+├── safety.py            # normalisation des cibles, anti-SSRF, résolution DNS
+├── scanner/
+│   ├── engine.py        # orchestration, progression, déduplication, score
+│   ├── fetcher.py       # client HTTP borné + sonde TLS (certificat, protocoles)
+│   ├── checks_http.py   # transport, en-têtes, cookies, CORS, méthodes
+│   ├── checks_tls.py    # certificat, expiration, protocoles obsolètes
+│   ├── checks_exposure.py  # fichiers exposés, robots.txt, erreurs, listage
+│   ├── checks_content.py   # analyse HTML (formulaires, SRI, contenu mixte)
+│   ├── checks_dns.py    # SPF, DMARC, CAA
+│   └── scoring.py       # pénalités, note, tri
+└── static/              # UI (HTML/CSS/JS, zéro dépendance externe)
+```
+
+Principes :
+
+1. **Tout est borné** : taille de réponse, nombre de redirections, délai global, concurrence.
+2. **Rien n'est caché** : chaque constat porte sa preuve brute et sa source.
+3. **Aucune donnée conservée** : les rapports vivent en mémoire du navigateur, rien n'est stocké côté serveur.
+4. **Séparation stricte** : une brique fautive ne fait pas tomber l'analyse (statut `error` par contrôle).
+
+---
 
 ## Tests
 
-Toute la suite s'exécute directement via `pytest` (18 tests couvrant les 19 recettes,
-`meshkit` v2, l'alignement UV `.glb`/`.obj`/`.usdz`, `meshgen` v2 vectoriel,
-`pbr.py`, `renderer.py`, `img2mesh.py`, `research.py`, `compare.py` et `preview.py` hors-ligne) :
-
 ```bash
-python3 -m pytest -v             # 18/18 tests (inclut smoke 19/19 recettes + motocross + v2)
-python3 tests/test_smoke.py      # tableau détaillé des 19 recettes (étanchéité + volume + dims)
-python3 tests/test_motocross.py  # benchmark rapide build + union booléenne motocross
+.venv/bin/python -m pytest -q
 ```
+
+La suite couvre :
+
+- la normalisation des URL et le blocage des cibles internes (SSRF) ;
+- le barème et les notes ;
+- l'analyse HTML (contenu mixte, formulaires, SRI, commentaires, `target=_blank`) ;
+- une analyse de bout en bout contre un serveur local volontairement vulnérable
+  (`.git`, `.env`, en-têtes absents, cookies, `robots.txt`, traces d'erreur…) ;
+- le contrat d'API (autorisation obligatoire, schémas refusés, métadonnées).
+
+---
+
+## Roadmap
+
+- [ ] Vérification de propriété du domaine (fichier `.well-known` ou enregistrement DNS)
+- [ ] Historique local des analyses et comparaison entre deux scans
+- [ ] Export PDF et intégration CI (échec si note < seuil)
+- [ ] Vérification de l'expiration des certificats via Certificate Transparency
+- [ ] Mode « API authentifiée » : cookies et en-têtes fournis par l'utilisateur pour scanner derrière un login
+- [ ] Détection de sous-domaines (énumération passive via CT logs et DNS)
+
+---
+
+## Références
+
+- OWASP Web Security Testing Guide — <https://owasp.org/www-project-web-security-testing-guide/>
+- OWASP Secure Headers Project — <https://owasp.org/www-project-secure-headers/>
+- RFC 9116 (`security.txt`), RFC 7208 (SPF), RFC 7489 (DMARC), RFC 8659 (CAA), RFC 6797 (HSTS)
+- MDN — Sécurité web — <https://developer.mozilla.org/fr/docs/Web/Security>
+
+---
 
 ## Licence
 
-MIT — voir [LICENSE](LICENSE).
+MIT. Voir [LICENSE](LICENSE).
