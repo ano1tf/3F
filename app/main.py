@@ -90,13 +90,13 @@ async def meta() -> dict:
         "scope": [
             "Transport : HTTPS, redirections, HSTS",
             "TLS : certificat, expiration, protocoles obsolètes",
-            "En-têtes : CSP, clickjacking, MIME sniffing, Referrer-Policy",
-            "Cookies : Secure, HttpOnly, SameSite",
+            "En-têtes : CSP directive par directive, clickjacking, MIME sniffing, Referrer-Policy",
+            "Cookies : Secure, HttpOnly, SameSite, préfixes __Host- / __Secure-",
             "CORS : origine reflétée, joker, credentials",
             "Méthodes HTTP : OPTIONS, TRACE",
-            "Fichiers exposés : .git, .env, sauvegardes, phpinfo, Actuator…",
+            "Fichiers exposés : .git/.env, sauvegardes, .aws, logs, Actuator, phpMyAdmin…",
             "Fuite d'information : versions, traces d'erreur, commentaires HTML",
-            "Contenu : contenu mixte, formulaires non chiffrés, SRI",
+            "Contenu : contenu mixte, formulaires non chiffrés, SRI, iframes, CSRF, cache",
             "DNS : SPF, DMARC, CAA",
         ],
         "limits": [
@@ -149,11 +149,11 @@ async def scan(payload: ScanRequest, request: Request) -> StreamingResponse:
                         break
                     try:
                         item = await asyncio.wait_for(queue.get(), timeout=0.2)
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         continue
                     yield item
                 await task
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 yield _event(
                     {
                         "type": "error",

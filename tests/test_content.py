@@ -71,3 +71,54 @@ def test_sri_only_flags_external_script_without_integrity():
 def test_http_page_is_not_double_reported():
     findings, _ = check_page(response(url="http://site.test/"))
     assert not any(f.id == "content.mixed-content" for f in findings)
+
+
+IFRAME_HTML = """<!doctype html><html><body>
+<iframe src="https://video.test/embed"></iframe>
+<iframe src="https://safe.test/embed" sandbox="allow-scripts"></iframe>
+</body></html>"""
+
+CSRF_HTML = """<!doctype html><html><body>
+<form action="/compte" method="post">
+  <input type="text" name="email">
+  <input type="password" name="pwd">
+</form>
+<form action="/autre" method="post">
+  <input type="hidden" name="_csrf" value="jeton">
+  <input type="text" name="nom">
+</form>
+</body></html>"""
+
+
+def test_iframe_without_sandbox_is_flagged():
+    findings, info = check_page(response(IFRAME_HTML))
+    assert len(info.iframes) == 2
+    flagged = next(f for f in findings if f.id == "content.iframe-no-sandbox")
+    assert "video.test" in flagged.evidence
+    assert "safe.test" not in flagged.evidence
+
+
+def test_post_form_without_csrf_token_is_only_informative():
+    findings, _ = check_page(response(CSRF_HTML))
+    csrf = next(f for f in findings if f.id == "content.csrf-token-missing")
+    assert csrf.severity.value == "info"
+    assert "action=/compte" in csrf.evidence
+    assert "/autre" not in csrf.evidence
+
+
+def test_password_page_without_no_store_is_flagged():
+    findings, _ = check_page(response(CSRF_HTML))
+    assert "content.sensitive-page-cacheable" in {f.id for f in findings}
+
+
+def test_password_page_with_no_store_is_not_flagged():
+    resp = HttpResponse(
+        url="https://site.test/",
+        status=200,
+        headers=httpx.Headers(
+            {"content-type": "text/html", "cache-control": "no-store, max-age=0"}
+        ),
+        body=CSRF_HTML.encode(),
+    )
+    findings, _ = check_page(resp)
+    assert "content.sensitive-page-cacheable" not in {f.id for f in findings}

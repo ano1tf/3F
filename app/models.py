@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class Severity(str, Enum):
+class Severity(StrEnum):
     CRITICAL = "critical"
     HIGH = "high"
     MEDIUM = "medium"
@@ -91,7 +91,10 @@ class ScanReport:
     checks: list[CheckResult] = field(default_factory=list)
     fingerprint: dict[str, str] = field(default_factory=dict)
     counts: dict[str, int] = field(default_factory=dict)
+    score_breakdown: dict[str, int] = field(default_factory=dict)
+    priorities: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    scan_id: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -105,5 +108,8 @@ class ScanReport:
             "checks": [c.to_dict() for c in self.checks],
             "fingerprint": self.fingerprint,
             "counts": self.counts,
+            "score_breakdown": self.score_breakdown,
+            "priorities": self.priorities,
+            "scan_id": self.scan_id,
             "errors": self.errors,
         }

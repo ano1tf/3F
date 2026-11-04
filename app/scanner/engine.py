@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import datetime, timezone
-from typing import Awaitable, Callable
+import uuid
+from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from urllib.parse import urlsplit, urlunsplit
 
 from .. import config
@@ -13,7 +14,14 @@ from ..models import CheckResult, Finding, ScanReport
 from ..safety import ScanError, validate_target
 from . import checks_content, checks_dns, checks_exposure, checks_http, checks_tls
 from .fetcher import Fetcher, same_origin
-from .scoring import count_by_severity, grade_for, score_findings, sort_findings
+from .scoring import (
+    compute_breakdown,
+    count_by_severity,
+    grade_for,
+    priorities,
+    score_findings,
+    sort_findings,
+)
 
 Emitter = Callable[[dict], Awaitable[None]]
 
@@ -49,7 +57,8 @@ async def run_scan(raw_target: str, emit: Emitter) -> ScanReport:
     started = time.perf_counter()
     report = ScanReport(
         target=raw_target.strip(),
-        started_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        started_at=datetime.now(UTC).isoformat(timespec="seconds"),
+        scan_id=uuid.uuid4().hex[:12],
     )
     percent = 0
 
@@ -131,7 +140,8 @@ async def run_scan(raw_target: str, emit: Emitter) -> ScanReport:
         )
 
         if tls_task is not None:
-            tls_findings = await tls_task
+            tls_findings, tls_meta = await tls_task
+            report.fingerprint.update(tls_meta)
             findings.extend(tls_findings)
             checks.append(CheckResult("tls", "Certificat & TLS", findings=tls_findings))
         else:
@@ -227,6 +237,8 @@ async def run_scan(raw_target: str, emit: Emitter) -> ScanReport:
         report.findings = sort_findings(findings)
         report.score = score_findings(report.findings)
         report.grade, _ = grade_for(report.score)
+        report.score_breakdown = compute_breakdown(report.findings)
+        report.priorities = [f.id for f in priorities(report.findings)]
         # Les constats d'un domaine redirigé ne doivent pas compter deux fois.
         report.counts = count_by_severity(report.findings)
         report.checks = checks

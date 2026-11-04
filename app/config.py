@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 APP_NAME = "VulnLens"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 APP_TAGLINE = "Scanner de vulnérabilités web — en un clic"
 
 # Identité envoyée aux cibles scannées (transparence : on ne se cache pas).

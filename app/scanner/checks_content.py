@@ -27,6 +27,7 @@ class PageInfo:
     links: list[str] = field(default_factory=list)
     images: list[str] = field(default_factory=list)
     iframes: list[str] = field(default_factory=list)
+    iframes_sandboxed: set[int] = field(default_factory=set)
     forms: list[dict] = field(default_factory=list)
     comments: list[str] = field(default_factory=list)
     inline_handlers: list[str] = field(default_factory=list)
@@ -60,6 +61,8 @@ class _PageParser(HTMLParser):
             self.info.images.append(a["src"])
         elif tag == "iframe" and a.get("src"):
             self.info.iframes.append(a["src"])
+            if a.get("sandbox") is not None:
+                self.info.iframes_sandboxed.add(len(self.info.iframes) - 1)
         elif tag == "meta":
             if a.get("http-equiv", "").lower() == "content-security-policy":
                 self.info.has_meta_csp = True
@@ -71,11 +74,14 @@ class _PageParser(HTMLParser):
                 "method": (a.get("method") or "get").lower(),
                 "has_password": False,
                 "autocomplete": a.get("autocomplete", ""),
+                "hidden": [],
             }
         elif tag == "input" and self._form is not None:
             input_type = a.get("type", "text").lower()
             if input_type == "password":
                 self._form["has_password"] = True
+            if input_type == "hidden" and a.get("name"):
+                self._form["hidden"].append(a["name"].lower())
         elif tag == "a":
             if a.get("target", "").lower() == "_blank" and "noopener" not in a.get("rel", "").lower():
                 self.info.blank_targets.append(a.get("href", "")[:120])
@@ -256,6 +262,77 @@ def check_page(response: HttpResponse) -> tuple[list[Finding], PageInfo]:
                 reference="https://developer.mozilla.org/fr/docs/Web/HTTP/CSP",
             )
         )
+
+    unsandboxed = [
+        src
+        for index, src in enumerate(info.iframes)
+        if index not in info.iframes_sandboxed
+    ]
+    if unsandboxed:
+        findings.append(
+            Finding(
+                id="content.iframe-no-sandbox",
+                title="Iframes sans attribut sandbox",
+                severity=Severity.LOW,
+                category=CATEGORY,
+                description="Une iframe non isolée peut exécuter des scripts, ouvrir des pop-ups "
+                "ou accéder à certaines API de la page hôte.",
+                evidence="\n".join(unsandboxed[:6]),
+                remediation='Ajoutez `sandbox="allow-scripts allow-same-origin"` (au strict '
+                "nécessaire) aux iframes tierces.",
+                reference="https://developer.mozilla.org/fr/docs/Web/HTML/Element/iframe",
+            )
+        )
+
+    token_names = ("csrf", "xsrf", "token", "nonce", "authenticity", "_token", "requestverification")
+    unprotected = [
+        f
+        for f in info.forms
+        if f["method"] == "post"
+        and urlsplit(urljoin(page_url, f["action"])).hostname in {
+            None,
+            urlsplit(page_url).hostname,
+        }
+        and not any(any(name in hidden for name in token_names) for hidden in f["hidden"])
+    ]
+    if unprotected:
+        findings.append(
+            Finding(
+                id="content.csrf-token-missing",
+                title="Formulaire POST sans jeton anti-CSRF visible",
+                severity=Severity.INFO,
+                category=CATEGORY,
+                description="Aucun champ caché ressemblant à un jeton CSRF n'a été trouvé. La "
+                "protection peut exister autrement (cookie SameSite, en-tête, vérification "
+                "d'origine) : c'est un point à vérifier manuellement, pas une preuve de faille.",
+                evidence="\n".join(
+                    f"action={f['action'] or '(page courante)'} champs cachés={f['hidden'] or 'aucun'}"
+                    for f in unprotected[:5]
+                ),
+                remediation="Vérifiez que chaque action sensible est protégée par un jeton "
+                "anti-CSRF à usage unique ou par une validation d'origine stricte.",
+                reference="https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html",
+            )
+        )
+
+    if any(f["has_password"] for f in info.forms):
+        cache_control = response.header("cache-control").lower()
+        if "no-store" not in cache_control:
+            findings.append(
+                Finding(
+                    id="content.sensitive-page-cacheable",
+                    title="Page d'authentification mise en cache",
+                    severity=Severity.LOW,
+                    category=CATEGORY,
+                    description="Une page contenant un formulaire de mot de passe sans "
+                    "`Cache-Control: no-store` peut rester dans le cache du navigateur ou d'un "
+                    "proxy partagé.",
+                    evidence=f"Cache-Control: {cache_control or 'absent'}",
+                    remediation="Ajoutez `Cache-Control: no-store` sur les pages d'authentification "
+                    "et les zones authentifiées.",
+                    reference="https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html",
+                )
+            )
 
     if info.generator and re.search(r"\d+\.\d+", info.generator):
         findings.append(

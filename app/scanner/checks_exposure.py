@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
+from datetime import UTC
 from urllib.parse import urljoin, urlparse
 
 from ..models import Finding, Severity
@@ -210,6 +211,177 @@ PROBES: list[Probe] = [
         "exposure.ds-store",
     ),
     Probe(
+        "/.git/logs/HEAD",
+        "Historique Git exposé",
+        Severity.CRITICAL,
+        "Le reflog contient les adresses e-mail des développeurs, les branches et les messages "
+        "de commit : une mine d'or pour l'ingénierie sociale et la reconstitution du code.",
+        "Bloquez l'accès à `.git/` en totalité et purgez l'historique des secrets.",
+        "https://owasp.org/www-project-web-security-testing-guide/",
+        _regex(r"[0-9a-f]{40} .+ <[^>]+@[^>]+>", "Entrée de reflog"),
+        "exposure.git-logs",
+    ),
+    Probe(
+        "/.svn/entries",
+        "Dépôt Subversion exposé",
+        Severity.MEDIUM,
+        "Un dossier `.svn` accessible permet de récupérer les sources et l'historique du projet.",
+        "Interdisez l'accès aux dossiers de métadonnées de version (`.svn`, `.hg`, `.git`).",
+        "https://owasp.org/www-project-web-security-testing-guide/",
+        _regex(r"^\d+\s*\n(dir|file)\s*$", "Entrées SVN", re.M),
+        "exposure.svn",
+    ),
+    Probe(
+        "/.hg/requires",
+        "Dépôt Mercurial exposé",
+        Severity.MEDIUM,
+        "Le fichier `requires` de Mercurial confirme qu'un dépôt est téléchargeable.",
+        "Interdisez l'accès au dossier `.hg/`.",
+        "https://owasp.org/www-project-web-security-testing-guide/",
+        _contains("revlogv1", "store", ignore_html=True),
+        "exposure.hg",
+    ),
+    Probe(
+        "/.env.production",
+        "Fichier .env.production exposé",
+        Severity.CRITICAL,
+        "L'environnement de production expose les identifiants réels des bases et services.",
+        "Bloquez tous les fichiers `.env*` et faites tourner les secrets.",
+        "https://owasp.org/www-project-top-ten/2017/A6_2017-Security_Misconfiguration",
+        _regex(r"(?m)^\s*[A-Z0-9_]{3,}\s*=", "Variable d'environnement"),
+        "exposure.dotenv-production",
+    ),
+    Probe(
+        "/.aws/credentials",
+        "Clés AWS exposées",
+        Severity.CRITICAL,
+        "Un fichier d'identifiants AWS accessible donne potentiellement le contrôle total du "
+        "compte cloud.",
+        "Supprimez immédiatement le fichier, révoquez les clés dans IAM et auditez CloudTrail.",
+        "https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html",
+        _contains("aws_access_key_id", "[default]", ignore_html=True),
+        "exposure.aws-credentials",
+    ),
+    Probe(
+        "/storage/logs/laravel.log",
+        "Journaux Laravel exposés",
+        Severity.HIGH,
+        "Les logs applicatifs contiennent des traces, des requêtes SQL et parfois des jetons de "
+        "session ou des mots de passe.",
+        "Interdisez l'accès au dossier `storage/` et purgez les logs exposés.",
+        "https://laravel.com/docs/logging",
+        _contains("production.ERROR", "stacktrace", "local.ERROR", ignore_html=True),
+        "exposure.laravel-log",
+    ),
+    Probe(
+        "/appsettings.json",
+        "Configuration .NET exposée",
+        Severity.HIGH,
+        "Le fichier peut contenir des chaînes de connexion et des clés de service.",
+        "Retirez les fichiers de configuration du répertoire public et utilisez un coffre de secrets.",
+        "https://learn.microsoft.com/fr-fr/aspnet/core/fundamentals/configuration/",
+        _regex(r'"ConnectionStrings"|"Logging"\s*:', "Configuration .NET"),
+        "exposure.appsettings",
+    ),
+    Probe(
+        "/trace.axd",
+        "Trace ASP.NET exposée",
+        Severity.HIGH,
+        "`trace.axd` révèle les requêtes, les en-têtes de session et les chemins internes de "
+        "l'application.",
+        "Désactivez le tracing (`<trace enabled=\"false\" />`) en production.",
+        "https://learn.microsoft.com/fr-fr/aspnet/web-forms/overview/older-versions-getting-started/deployment-to-a-hosting-provider/",
+        _contains("Application Trace", "Request Details", "Trace Information"),
+        "exposure.trace-axd",
+    ),
+    Probe(
+        "/server-info",
+        "Informations serveur Apache exposées",
+        Severity.HIGH,
+        "Le module mod_info divulgue la configuration complète : modules, chemins, versions.",
+        "Désactivez `mod_info` ou restreignez son accès aux administrateurs.",
+        "https://httpd.apache.org/docs/2.4/mod/mod_info.html",
+        _contains("Server Settings", "Server Version", "Module Name"),
+        "exposure.server-info",
+    ),
+    Probe(
+        "/crossdomain.xml",
+        "Politique crossdomain.xml permissive",
+        Severity.MEDIUM,
+        "Une politique autorisant `*` permet à n'importe quel site Flash/AIR de lire les réponses "
+        "authentifiées.",
+        "Restreignez `allow-access-from` aux domaines de confiance, ou supprimez le fichier.",
+        "https://www.adobe.com/devnet-docs/acrobatetk/tools/AppSec/rossdomain.html",
+        _regex(r'allow-access-from\s+domain\s*=\s*["\']?\*', "Domaine générique autorisé", re.I),
+        "exposure.crossdomain",
+    ),
+    Probe(
+        "/phpmyadmin/",
+        "Interface phpMyAdmin accessible",
+        Severity.MEDIUM,
+        "L'interface d'administration de la base de données est exposée publiquement : cible "
+        "privilégiée pour la force brute.",
+        "Restreignez l'accès par IP ou VPN et activez l'authentification à deux facteurs.",
+        "https://www.phpmyadmin.net/",
+        _contains("phpMyAdmin", "pma_username"),
+        "exposure.phpmyadmin",
+    ),
+    Probe(
+        "/wp-json/wp/v2/users",
+        "Énumération des utilisateurs WordPress",
+        Severity.MEDIUM,
+        "L'API REST expose les comptes existants (`slug`, nom affiché), ce qui alimente "
+        "directement une attaque par force brute ciblée.",
+        "Désactivez l'endpoint ou filtrez les champs publics ; utilisez un plugin de sécurité "
+        "et des mots de passe forts avec 2FA.",
+        "https://developer.wordpress.org/rest-api/reference/users/",
+        _regex(r'"slug"\s*:', "Liste d'utilisateurs"),
+        "exposure.wp-users",
+    ),
+    Probe(
+        "/xmlrpc.php",
+        "XML-RPC WordPress actif",
+        Severity.MEDIUM,
+        "`xmlrpc.php` autorise des milliers de tentatives d'authentification en une requête "
+        "(amplification de force brute).",
+        "Désactivez XML-RPC si vous ne l'utilisez pas (filtre serveur ou plugin).",
+        "https://developer.wordpress.org/reference/classes/wp_xmlrpc_server/",
+        _contains("XML-RPC server accepts POST requests only"),
+        "exposure.xmlrpc",
+    ),
+    Probe(
+        "/readme.html",
+        "Fichier readme.html exposé",
+        Severity.LOW,
+        "Le readme par défaut de WordPress confirme la présence du CMS et parfois sa version.",
+        "Supprimez `readme.html` et masquez la version du CMS.",
+        "https://wordpress.org/support/article/hardening-wordpress/",
+        _regex(r"Semantic Personal Publishing|WordPress\s*(&rsaquo;|›)?\s*\d+\.\d+", "Marqueur WordPress"),
+        "exposure.readme",
+    ),
+    Probe(
+        "/config.php.bak",
+        "Sauvegarde de configuration PHP exposée",
+        Severity.HIGH,
+        "Une copie `.bak` du fichier de configuration contient les identifiants de base de "
+        "données et les clés de salage.",
+        "Supprimez les fichiers de sauvegarde et bloquez les extensions `.bak`, `.old`, `.orig`.",
+        "https://owasp.org/www-project-web-security-testing-guide/",
+        _contains("<?php", "DB_PASSWORD", "DB_NAME", ignore_html=False),
+        "exposure.php-bak",
+    ),
+    Probe(
+        "/.idea/workspace.xml",
+        "Projet JetBrains exposé",
+        Severity.LOW,
+        "Le fichier de workspace révèle l'arborescence du projet et parfois des chemins de "
+        "déploiement.",
+        "Excluez les dossiers d'IDE du déploiement.",
+        "https://owasp.org/www-project-web-security-testing-guide/",
+        _contains("<project version", "ProjectRootManager"),
+        "exposure.jetbrains",
+    ),
+    Probe(
         "/backup.zip",
         "Archive de sauvegarde téléchargeable",
         Severity.HIGH,
@@ -221,6 +393,30 @@ PROBES: list[Probe] = [
         if r.status == 200 and "html" not in r.header("content-type").lower()
         else None,
         "exposure.backup-zip",
+    ),
+    Probe(
+        "/backup.tar.gz",
+        "Archive de sauvegarde téléchargeable",
+        Severity.HIGH,
+        "Une archive accessible permet de récupérer le code source ou les données complètes.",
+        "Supprimez les archives du répertoire public et stockez les sauvegardes hors du serveur.",
+        "https://owasp.org/www-project-web-security-testing-guide/",
+        lambda r: f"HTTP {r.status}, {r.header('content-type') or 'type inconnu'}"
+        if r.status == 200 and "html" not in r.header("content-type").lower()
+        else None,
+        "exposure.backup-tar",
+    ),
+    Probe(
+        "/site.zip",
+        "Archive du site téléchargeable",
+        Severity.HIGH,
+        "L'archive complète du site (sources, médias, configuration) est téléchargeable.",
+        "Retirez les archives du répertoire servi et protégez les exports.",
+        "https://owasp.org/www-project-web-security-testing-guide/",
+        lambda r: f"HTTP {r.status}, {r.header('content-type') or 'type inconnu'}"
+        if r.status == 200 and "html" not in r.header("content-type").lower()
+        else None,
+        "exposure.site-zip",
     ),
     Probe(
         "/backup.sql",
@@ -306,6 +502,32 @@ async def check_exposed_files(fetcher: Fetcher, base_url: str) -> tuple[list[Fin
         if probe.id == "exposure.security-txt":
             if resp.status == 200 and "contact:" in resp.text.lower():
                 meta["security.txt"] = "présent"
+                expiry = re.search(r"(?im)^expires:\s*(.+)$", resp.text)
+                if expiry:
+                    meta["security.txt_expire"] = expiry.group(1).strip()[:40]
+                    try:
+                        from datetime import datetime
+
+                        stamp = datetime.fromisoformat(
+                            expiry.group(1).strip().replace("Z", "+00:00")
+                        )
+                        if stamp < datetime.now(UTC):
+                            findings.append(
+                                Finding(
+                                    id="exposure.security-txt-expired",
+                                    title="security.txt expiré",
+                                    severity=Severity.LOW,
+                                    category=CATEGORY,
+                                    description="Le champ `Expires` est dépassé : le fichier est "
+                                    "considéré comme obsolète par les chercheurs.",
+                                    evidence=f"Expires: {expiry.group(1).strip()}",
+                                    remediation="Mettez à jour `Expires` (moins d'un an) et vérifiez "
+                                    "que le contact est toujours valide.",
+                                    reference="https://www.rfc-editor.org/rfc/rfc9116",
+                                )
+                            )
+                    except ValueError:
+                        pass
             else:
                 findings.append(
                     Finding(
@@ -319,6 +541,11 @@ async def check_exposed_files(fetcher: Fetcher, base_url: str) -> tuple[list[Fin
                         reference=probe.reference,
                     )
                 )
+            continue
+
+        # Une signature n'a de valeur que sur une réponse réellement servie (200) :
+        # sinon n'importe quelle page d'erreur personnalisée créerait un faux positif.
+        if resp.status != 200:
             continue
 
         evidence = probe.validate(resp)

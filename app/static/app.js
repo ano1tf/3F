@@ -40,6 +40,10 @@
   let currentReport = null;
   let activeFilter = "all";
   let searchTerm = "";
+  let history = [];
+
+  const HISTORY_KEY = "vulnlens.history.v1";
+  const HISTORY_MAX = 10;
 
   /* ----------------------------- Utilitaires ----------------------------- */
 
@@ -251,7 +255,7 @@
 
   /* -------------------------------- Rapport ------------------------------- */
 
-  function renderReport(report) {
+  function renderReport(report, options = {}) {
     currentReport = report;
     activeFilter = "all";
     searchTerm = "";
@@ -295,8 +299,16 @@
 
     renderFilters(report.findings || []);
     renderFindings();
+    renderPriorities(report);
+    renderBreakdown(report);
     renderFingerprint(report.fingerprint || {});
     renderChecks(report.checks || []);
+
+    if (!options.fromHistory) {
+      saveToHistory(report);
+    }
+    renderComparison(report);
+    renderHistory();
 
     results.scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -377,6 +389,16 @@
         head.setAttribute("aria-expanded", open ? "true" : "false");
       });
 
+      $(".copy-finding", node).addEventListener("click", async (event) => {
+        event.stopPropagation();
+        const button = event.currentTarget;
+        await copyText(findingToText(finding));
+        button.textContent = "Copié ✓";
+        setTimeout(() => {
+          button.textContent = "Copier ce constat";
+        }, 1600);
+      });
+
       container.appendChild(node);
     });
   }
@@ -425,6 +447,261 @@
       if (check.detail) li.title = check.detail;
       list.appendChild(li);
     });
+  }
+
+
+  /* ------------------------- Priorités & composition ---------------------- */
+
+  function findingById(id) {
+    return ((currentReport && currentReport.findings) || []).find((f) => f.id === id);
+  }
+
+  function renderPriorities(report) {
+    const panel = $("#priority-panel");
+    const list = $("#priority-list");
+    list.innerHTML = "";
+    const ids = report.priorities || [];
+    const items = ids.map(findingById).filter(Boolean);
+    if (!items.length) {
+      panel.hidden = true;
+      return;
+    }
+    panel.hidden = false;
+    items.forEach((finding, index) => {
+      const card = el("button", "priority-card");
+      card.type = "button";
+      card.dataset.sev = finding.severity;
+      card.dataset.id = finding.id;
+
+      card.appendChild(el("span", "priority-rank", String(index + 1)));
+
+      const main = el("span", "priority-main");
+      main.appendChild(el("span", "priority-title", finding.title));
+      main.appendChild(
+        el(
+          "span",
+          "priority-fix",
+          (finding.remediation || "").slice(0, 160) +
+            ((finding.remediation || "").length > 160 ? "…" : "")
+        )
+      );
+      card.appendChild(main);
+      card.appendChild(el("span", "priority-go", "Voir le détail →"));
+
+      card.addEventListener("click", () => {
+        const target = document.querySelector(`.finding[data-id="${finding.id}"]`);
+        if (!target) return;
+        target.classList.add("open");
+        $(".finding-head", target).setAttribute("aria-expanded", "true");
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
+        target.animate(
+          [
+            { boxShadow: "0 0 0 0 rgba(34,211,238,0)" },
+            { boxShadow: "0 0 0 4px rgba(34,211,238,.35)" },
+            { boxShadow: "0 0 0 0 rgba(34,211,238,0)" },
+          ],
+          { duration: 1400 }
+        );
+      });
+
+      list.appendChild(card);
+    });
+  }
+
+  function renderBreakdown(report) {
+    const panel = $("#breakdown-panel");
+    const list = $("#breakdown");
+    list.innerHTML = "";
+    if (!report.score_breakdown) {
+      // Rapport archivé par une version antérieure : pas de décomposition connue.
+      panel.hidden = true;
+      return;
+    }
+    panel.hidden = false;
+    const breakdown = report.score_breakdown;
+    const entries = Object.entries(breakdown).sort((a, b) => b[1] - a[1]);
+
+    if (!entries.length) {
+      $("#breakdown-total").textContent = "aucune pénalité";
+      list.appendChild(el("li", "muted small", "Aucun point perdu : tous les contrôles sont au vert."));
+      return;
+    }
+
+    const total = entries.reduce((sum, [, points]) => sum + points, 0);
+    $("#breakdown-total").textContent = `−${total} points sur 100`;
+    const max = Math.max(...entries.map(([, points]) => points));
+
+    entries.forEach(([category, points]) => {
+      const li = el("li");
+      const head = el("div", "bd-head");
+      head.appendChild(el("span", null, category));
+      head.appendChild(el("span", "bd-points", `−${points}`));
+      const track = el("div", "bd-track");
+      const fill = el("div", "bd-fill");
+      track.appendChild(fill);
+      li.appendChild(head);
+      li.appendChild(track);
+      list.appendChild(li);
+      requestAnimationFrame(() => {
+        fill.style.width = `${Math.max(4, (points / max) * 100)}%`;
+      });
+    });
+  }
+
+  /* ------------------------------- Historique ----------------------------- */
+
+  function hostOf(report) {
+    const value = report.final_url || report.target || "";
+    try {
+      return new URL(value).hostname;
+    } catch (_) {
+      return value.replace(/^https?:\/\//, "").split("/")[0];
+    }
+  }
+
+  function loadHistory() {
+    try {
+      const raw = localStorage.getItem(HISTORY_KEY);
+      history = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(history)) history = [];
+    } catch (_) {
+      history = [];
+    }
+  }
+
+  function persistHistory() {
+    try {
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(0, HISTORY_MAX)));
+    } catch (_) {
+      // Quota dépassé : on garde les analyses les plus récentes uniquement.
+      history = history.slice(0, 3);
+      try {
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+      } catch (_) {
+        /* stockage indisponible : l'interface continue de fonctionner */
+      }
+    }
+  }
+
+  function saveToHistory(report) {
+    history = history.filter((entry) => entry.report.scan_id !== report.scan_id);
+    history.unshift({ savedAt: new Date().toISOString(), report });
+    history = history.slice(0, HISTORY_MAX);
+    persistHistory();
+  }
+
+  function findPrevious(report) {
+    const host = hostOf(report);
+    return (
+      history.find(
+        (entry) => entry.report.scan_id !== report.scan_id && hostOf(entry.report) === host
+      ) || null
+    );
+  }
+
+  function renderComparison(report) {
+    const node = $("#comparison");
+    const previous = findPrevious(report);
+    if (!previous) {
+      node.hidden = true;
+      return;
+    }
+
+    const previousIds = new Set((previous.report.findings || []).map((f) => f.id));
+    const currentIds = new Set((report.findings || []).map((f) => f.id));
+    const fixed = [...previousIds].filter((id) => !currentIds.has(id)).length;
+    const added = [...currentIds].filter((id) => !previousIds.has(id)).length;
+    const delta = report.score - previous.report.score;
+
+    const parts = [];
+    const dateLabel = formatDate(previous.report.started_at);
+    const deltaText =
+      delta > 0
+        ? `<span class="up">+${delta} points</span>`
+        : delta < 0
+        ? `<span class="down">${delta} points</span>`
+        : "score identique";
+
+    parts.push(`<span>vs ${dateLabel} (score ${previous.report.score}) : ${deltaText}</span>`);
+    if (fixed) parts.push(`<span>${fixed} constat${fixed > 1 ? "s" : ""} corrigé${fixed > 1 ? "s" : ""}</span>`);
+    if (added) parts.push(`<span>${added} nouveau${added > 1 ? "x" : ""} constat${added > 1 ? "s" : ""}</span>`);
+
+    node.innerHTML = parts.join(" · ");
+    node.hidden = false;
+  }
+
+  function renderHistory() {
+    const panel = $("#history-panel");
+    const list = $("#history");
+    list.innerHTML = "";
+    if (!history.length) {
+      panel.hidden = true;
+      return;
+    }
+    panel.hidden = false;
+
+    history.forEach((entry) => {
+      const report = entry.report;
+      const item = el("button", "history-item");
+      item.type = "button";
+      if (currentReport && report.scan_id === currentReport.scan_id) {
+        item.classList.add("current");
+      }
+      item.appendChild(el("span", "history-host", hostOf(report)));
+      item.appendChild(el("span", "history-date", formatDate(report.started_at)));
+      const score = el("span", "history-score", `${report.score}/100`);
+      score.style.color =
+        report.score >= 80 ? "#34d399" : report.score >= 60 ? "#ffd166" : "#ff8a3d";
+      item.appendChild(score);
+      item.appendChild(el("span", "history-score", report.grade));
+      item.addEventListener("click", () => {
+        renderReport(report, { fromHistory: true });
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      });
+      list.appendChild(item);
+    });
+  }
+
+  function clearHistory() {
+    history = [];
+    try {
+      localStorage.removeItem(HISTORY_KEY);
+    } catch (_) {}
+    renderHistory();
+    $("#comparison").hidden = true;
+  }
+
+  /* --------------------------------- Copie -------------------------------- */
+
+  async function copyText(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (_) {
+      const area = document.createElement("textarea");
+      area.value = text;
+      document.body.appendChild(area);
+      area.select();
+      document.execCommand("copy");
+      area.remove();
+      return false;
+    }
+  }
+
+  function findingToText(finding) {
+    return [
+      `[${finding.severity_label || severityLabel(finding.severity)}] ${finding.title}`,
+      `Catégorie : ${finding.category}`,
+      "",
+      finding.description,
+      "",
+      "Preuve :",
+      finding.evidence || "—",
+      "",
+      "Remédiation :",
+      finding.remediation || "—",
+      finding.reference ? `\nRéférence : ${finding.reference}` : "",
+    ].join("\n");
   }
 
   /* -------------------------------- Exports ------------------------------- */
@@ -515,6 +792,8 @@
   /* -------------------------------- Événements ---------------------------- */
 
   form.addEventListener("submit", startScan);
+  $("#print-report").addEventListener("click", () => window.print());
+  $("#clear-history").addEventListener("click", clearHistory);
   $("#export-json").addEventListener("click", downloadJson);
   $("#copy-md").addEventListener("click", copyMarkdown);
   $("#new-scan").addEventListener("click", () => {
@@ -531,5 +810,21 @@
     renderFindings();
   });
 
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "/" && !["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) {
+      if (results.hidden) return;
+      event.preventDefault();
+      $("#findings-search").focus();
+    }
+    if (event.key === "Escape" && document.activeElement === $("#findings-search")) {
+      $("#findings-search").value = "";
+      searchTerm = "";
+      renderFindings();
+      $("#findings-search").blur();
+    }
+  });
+
+  loadHistory();
+  renderHistory();
   loadMeta();
 })();

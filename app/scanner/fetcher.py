@@ -57,7 +57,7 @@ class Fetcher:
     async def close(self) -> None:
         await self._client.aclose()
 
-    async def __aenter__(self) -> "Fetcher":
+    async def __aenter__(self) -> Fetcher:
         return self
 
     async def __aexit__(self, *_exc: object) -> None:
@@ -141,16 +141,25 @@ def _handshake(host: str, port: int, min_version=None, insecure: bool = False) -
         ctx.check_hostname = True
         ctx.verify_mode = ssl.CERT_REQUIRED
     ctx.load_default_certs()
+    try:
+        ctx.set_alpn_protocols(["h2", "http/1.1"])
+    except NotImplementedError:  # pragma: no cover - OpenSSL minimal
+        pass
     if min_version is not None:
         ctx.minimum_version = min_version
         ctx.set_ciphers("DEFAULT:@SECLEVEL=0")
 
     with socket_create(host, port, ctx) as ssock:
         cert = ssock.getpeercert() or {}
+        try:
+            alpn = ssock.selected_alpn_protocol() or ""
+        except Exception:  # pragma: no cover
+            alpn = ""
         return {
             "protocol": ssock.version() or "",
             "cipher": ssock.cipher() or (),
             "cert": cert,
+            "alpn": alpn,
         }
 
 

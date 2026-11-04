@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import ssl
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from ..models import Finding, Severity
 from .fetcher import tls_probe
 
 
-async def check_tls(host: str, port: int) -> list[Finding]:
+async def _analyse_tls(host: str, port: int) -> tuple[list[Finding], dict]:
     info = await tls_probe(host, port)
     findings: list[Finding] = []
 
@@ -27,7 +26,7 @@ async def check_tls(host: str, port: int) -> list[Finding]:
                 reference="https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Security_Cheat_Sheet.html",
             )
         )
-        return findings
+        return findings, info
 
     cert = info.get("cert") or {}
     if not cert:
@@ -42,7 +41,7 @@ async def check_tls(host: str, port: int) -> list[Finding]:
                 remediation="Vérifiez la chaîne de certification servie par le serveur.",
             )
         )
-        return findings
+        return findings, info
 
     if info.get("cert_error"):
         findings.append(
@@ -63,8 +62,8 @@ async def check_tls(host: str, port: int) -> list[Finding]:
     not_after = cert.get("notAfter")
     if not_after:
         try:
-            expiry = datetime.strptime(not_after, "%b %d %H:%M:%S %Y %Z").replace(tzinfo=timezone.utc)
-            days_left = (expiry - datetime.now(timezone.utc)).days
+            expiry = datetime.strptime(not_after, "%b %d %H:%M:%S %Y %Z").replace(tzinfo=UTC)
+            days_left = (expiry - datetime.now(UTC)).days
             if days_left < 0:
                 findings.append(
                     Finding(
@@ -90,6 +89,30 @@ async def check_tls(host: str, port: int) -> list[Finding]:
                         evidence=f"Expire le {not_after} (dans {days_left} jours).",
                         remediation="Renouvelez le certificat et mettez en place un renouvellement "
                         "automatique.",
+                    )
+                )
+        except ValueError:
+            pass
+
+    # Durée de validité : au-delà de 398 jours, Chrome et Safari refusent le certificat.
+    not_before = cert.get("notBefore")
+    if not_before and not_after:
+        try:
+            start = datetime.strptime(not_before, "%b %d %H:%M:%S %Y %Z")
+            end = datetime.strptime(not_after, "%b %d %H:%M:%S %Y %Z")
+            lifetime = (end - start).days
+            if lifetime > 398:
+                findings.append(
+                    Finding(
+                        id="tls.validity-too-long",
+                        title="Certificat de validité trop longue",
+                        severity=Severity.LOW,
+                        category="TLS",
+                        description="Les navigateurs (Chrome, Safari) rejettent les certificats "
+                        "émis pour plus de 398 jours : les visiteurs risquent un avertissement.",
+                        evidence=f"Validité de {lifetime} jours ({not_before} → {not_after}).",
+                        remediation="Réduisez la durée de vie et automatisez le renouvellement (ACME).",
+                        reference="https://cabforum.org/working-groups/server/baseline-requirements/",
                     )
                 )
         except ValueError:
@@ -154,7 +177,13 @@ async def check_tls(host: str, port: int) -> list[Finding]:
                 reference="https://www.ssllabs.com/ssltest/",
             )
         )
-    return findings
+    return findings, info
+
+
+async def check_tls(host: str, port: int) -> tuple[list[Finding], dict[str, str]]:
+    """Contrôle TLS + empreinte lisible (version, chiffrement, certificat)."""
+    findings, info = await _analyse_tls(host, port)
+    return findings, describe_certificate(info)
 
 
 def describe_certificate(info: dict) -> dict[str, str]:
@@ -164,10 +193,13 @@ def describe_certificate(info: dict) -> dict[str, str]:
         return {}
     subject = {k: v for item in cert.get("subject", ()) for k, v in item}
     issuer = {k: v for item in cert.get("issuer", ()) for k, v in item}
+    san = [entry[1] for entry in cert.get("subjectAltName", ()) if entry[0].lower() == "dns"]
     return {
         "tls_version": info.get("protocol", ""),
         "tls_cipher": (info.get("cipher") or ("",))[0],
+        "http2": "oui" if info.get("alpn") == "h2" else "non",
         "certificat_sujet": subject.get("commonName", ""),
         "certificat_emetteur": issuer.get("organizationName", "") or issuer.get("commonName", ""),
         "certificat_expire": cert.get("notAfter", ""),
+        "certificat_domaines": ", ".join(san[:4]) + ("…" if len(san) > 4 else ""),
     }

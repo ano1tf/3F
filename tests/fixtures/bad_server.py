@@ -23,6 +23,7 @@ INDEX_HTML = """<!doctype html>
     <input type="password" name="password">
     <button type="submit">Connexion</button>
   </form>
+  <iframe src="https://video.test/embed"></iframe>
   <a href="https://example.org" target="_blank">partenaire</a>
 </body>
 </html>
@@ -39,6 +40,10 @@ class BadSiteHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(payload)))
         self.send_header("Set-Cookie", "session=abc123; Path=/")
+        self.send_header("Set-Cookie", "__Host-insecure=1; Path=/; Domain=test.local")
+        self.send_header(
+            "Content-Security-Policy", "default-src *; script-src 'unsafe-inline' http: *"
+        )
         self.send_header("X-Powered-By", "PHP/7.4.3")
         self.end_headers()
         if self.command != "HEAD":
@@ -88,7 +93,7 @@ class FixtureServer:
     def url(self) -> str:
         return f"http://127.0.0.1:{self.port}/"
 
-    def __enter__(self) -> "FixtureServer":
+    def __enter__(self) -> FixtureServer:
         self.thread.start()
         return self
 

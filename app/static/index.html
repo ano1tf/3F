@@ -25,7 +25,7 @@
         </svg>
       </span>
       <span class="brand-name">VulnLens</span>
-      <span class="brand-tag">v1.0</span>
+      <span class="brand-tag">v1.1</span>
     </a>
     <nav class="topnav">
       <a href="#methode">Méthode</a>
@@ -112,6 +112,7 @@
             <h2 id="summary-title">Rapport d'analyse</h2>
             <p class="mono target-url" id="result-target"></p>
             <p class="muted" id="result-meta"></p>
+            <p class="comparison" id="comparison" hidden></p>
           </div>
         </div>
         <div class="summary-right">
@@ -119,9 +120,18 @@
           <div class="actions">
             <button class="btn-ghost" id="export-json" type="button">Télécharger le JSON</button>
             <button class="btn-ghost" id="copy-md" type="button">Copier le rapport</button>
+            <button class="btn-ghost" id="print-report" type="button">Imprimer / PDF</button>
             <button class="btn-ghost" id="new-scan" type="button">Nouvelle analyse</button>
           </div>
         </div>
+      </article>
+
+      <article class="panel priorities" id="priority-panel" hidden>
+        <div class="panel-head">
+          <h2>À corriger en priorité</h2>
+          <span class="muted small">les trois constats qui comptent le plus</span>
+        </div>
+        <ol class="priority-list" id="priority-list"></ol>
       </article>
 
       <div class="results-toolbar">
@@ -140,6 +150,14 @@
         Aucun constat pour ce filtre. 🌤️
       </p>
 
+      <article class="panel" id="breakdown-panel">
+        <div class="panel-head">
+          <h2>Composition du score</h2>
+          <span class="muted small" id="breakdown-total"></span>
+        </div>
+        <ul class="breakdown" id="breakdown"></ul>
+      </article>
+
       <div class="two-col">
         <article class="panel">
           <div class="panel-head"><h2>Empreinte technique</h2></div>
@@ -150,6 +168,18 @@
           <ul class="checks" id="checks"></ul>
         </article>
       </div>
+
+      <article class="panel" id="history-panel" hidden>
+        <div class="panel-head">
+          <h2>Historique local</h2>
+          <button class="btn-ghost" id="clear-history" type="button">Effacer</button>
+        </div>
+        <ul class="history" id="history"></ul>
+        <p class="muted small">
+          Stocké uniquement dans ce navigateur (aucun envoi au serveur). Clique sur une analyse
+          pour rouvrir son rapport.
+        </p>
+      </article>
     </section>
 
     <!-- Méthode / état vide -->
@@ -200,7 +230,10 @@
           <h3>Remédiation</h3>
           <p class="finding-fix"></p>
         </div>
-        <a class="reference" target="_blank" rel="noopener noreferrer">Documentation ↗</a>
+        <div class="finding-footer">
+          <a class="reference" target="_blank" rel="noopener noreferrer">Documentation ↗</a>
+          <button class="btn-ghost btn-mini copy-finding" type="button">Copier ce constat</button>
+        </div>
       </div>
     </article>
   </template>
