@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 APP_NAME = "VulnLens"
-APP_VERSION = "6.0.0"
+APP_VERSION = "6.1.0"
 APP_TAGLINE = "Scanner de vulnérabilités web — en un clic"
 
 # Identité envoyée aux cibles scannées (transparence : on ne se cache pas).
@@ -37,6 +37,22 @@ ALERT_ON_CRITICAL = os.getenv("VULNLENS_ALERT_ON_CRITICAL", "1") in {"1", "true"
 
 # --- Protection de l'instance (vide = pas d'authentification) ---------------
 AUTH_TOKEN = os.getenv("VULNLENS_TOKEN", "").strip()
+
+# Derrière un reverse proxy de confiance, `X-Forwarded-For` / `X-Forwarded-Host`
+# peuvent être utilisés pour la limitation de débit et le contrôle d'origine.
+# Désactivé par défaut : sinon l'en-tête est falsifiable par n'importe qui.
+TRUST_PROXY_HEADERS = os.getenv("VULNLENS_TRUST_PROXY", "0").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
+# Origines supplémentaires autorisées à appeler l'API (séparées par des virgules),
+# utile quand l'interface est servie depuis un autre nom de domaine.
+ALLOWED_ORIGINS = tuple(
+    item.strip() for item in os.getenv("VULNLENS_ALLOWED_ORIGINS", "").split(",") if item.strip()
+)
 
 # Surveillance planifiée (opt-in : sans activation, aucun scan automatique n'est lancé)
 WATCH_ENABLED = os.getenv("VULNLENS_WATCH", "0").strip().lower() in {"1", "true", "yes", "on"}

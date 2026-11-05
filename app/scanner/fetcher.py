@@ -11,6 +11,9 @@ from urllib.parse import urljoin, urlsplit
 import httpx
 
 from .. import config
+from ..safety import ScanError, validate_redirect_url
+
+REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 
 
 @dataclass
@@ -22,6 +25,7 @@ class HttpResponse:
     history: list[tuple[str, int]] = field(default_factory=list)
     elapsed_ms: int = 0
     error: str | None = None
+    blocked: bool = False
 
     @property
     def ok(self) -> bool:
@@ -36,13 +40,20 @@ class HttpResponse:
 
 
 class Fetcher:
-    """Petit wrapper httpx avec limites strictes (taille, durée, redirections)."""
+    """Petit wrapper httpx avec limites strictes (taille, durée, redirections).
 
-    def __init__(self, allow_private: bool = False) -> None:
+    Les redirections sont suivies **manuellement** : chaque saut est revalidé par
+    `safety.validate_redirect_url`. C'est indispensable, sinon un site public peut
+    renvoyer un `302` vers `http://169.254.169.254/…` et transformer le scanner en
+    proxy SSRF (l'ancien `follow_redirects=True` d'httpx ne vérifiait rien).
+    """
+
+    def __init__(self, allow_private: bool = False, enforce_guard: bool = True) -> None:
         self.allow_private = allow_private
+        self.enforce_guard = enforce_guard
         self._client = httpx.AsyncClient(
             timeout=httpx.Timeout(config.HTTP_TIMEOUT, connect=min(8.0, config.HTTP_TIMEOUT)),
-            follow_redirects=True,
+            follow_redirects=False,  # géré à la main, saut par saut (anti-SSRF)
             max_redirects=config.MAX_REDIRECTS,
             verify=True,
             headers={
@@ -63,6 +74,40 @@ class Fetcher:
     async def __aexit__(self, *_exc: object) -> None:
         await self.close()
 
+    async def _guard(self, url: str) -> None:
+        """Refuse toute URL interne avant l'envoi de la requête."""
+        if not self.enforce_guard:
+            return
+        await validate_redirect_url(url, self.allow_private)
+
+    async def _send(
+        self,
+        method: str,
+        url: str,
+        headers: dict[str, str] | None,
+        max_bytes: int,
+        read_body: bool,
+        timeout: float | None,
+    ) -> tuple[int, httpx.Headers, bytes, str]:
+        async with self._client.stream(
+            method,
+            url,
+            headers=headers,
+            follow_redirects=False,
+            timeout=timeout or config.HTTP_TIMEOUT,
+        ) as response:
+            body = b""
+            if read_body:
+                chunks: list[bytes] = []
+                size = 0
+                async for chunk in response.aiter_bytes():
+                    chunks.append(chunk)
+                    size += len(chunk)
+                    if size >= max_bytes:
+                        break
+                body = b"".join(chunks)[:max_bytes]
+            return response.status_code, httpx.Headers(response.headers), body, str(response.url)
+
     async def request(
         self,
         method: str,
@@ -75,41 +120,103 @@ class Fetcher:
         timeout: float | None = None,
     ) -> HttpResponse:
         started = time.perf_counter()
-        try:
-            async with self._client.stream(
-                method,
-                url,
-                headers=headers,
-                follow_redirects=follow_redirects,
-                timeout=timeout or config.HTTP_TIMEOUT,
-            ) as response:
-                body = b""
-                if read_body:
-                    chunks: list[bytes] = []
-                    size = 0
-                    async for chunk in response.aiter_bytes():
-                        chunks.append(chunk)
-                        size += len(chunk)
-                        if size >= max_bytes:
-                            break
-                    body = b"".join(chunks)[:max_bytes]
-                history = [(str(r.url), r.status_code) for r in response.history]
+        method = method.upper()
+        current = str(url)
+        history: list[tuple[str, int]] = []
+
+        for _hop in range(config.MAX_REDIRECTS + 1):
+            try:
+                await self._guard(current)
+            except ScanError as exc:
                 return HttpResponse(
-                    url=str(response.url),
-                    status=response.status_code,
-                    headers=response.headers,
+                    url=current,
+                    history=history,
+                    elapsed_ms=int((time.perf_counter() - started) * 1000),
+                    error=exc.message,
+                    blocked=True,
+                )
+            except Exception:  # pragma: no cover - filet de sécurité
+                return HttpResponse(
+                    url=current,
+                    history=history,
+                    error="Requête bloquée par le garde-fou de sécurité.",
+                    blocked=True,
+                )
+
+            try:
+                status, response_headers, body, final_url = await self._send(
+                    method, current, headers, max_bytes, read_body, timeout
+                )
+            except httpx.TooManyRedirects as exc:
+                return HttpResponse(
+                    url=current,
+                    history=history,
+                    error=f"Trop de redirections ({exc})",
+                    elapsed_ms=int((time.perf_counter() - started) * 1000),
+                )
+            except httpx.TimeoutException:
+                return HttpResponse(
+                    url=current,
+                    history=history,
+                    error="Délai dépassé",
+                    elapsed_ms=int((time.perf_counter() - started) * 1000),
+                )
+            except httpx.HTTPError as exc:
+                return HttpResponse(
+                    url=current,
+                    history=history,
+                    error=f"{type(exc).__name__}: {exc}",
+                    elapsed_ms=int((time.perf_counter() - started) * 1000),
+                )
+            except Exception as exc:  # pragma: no cover - filet de sécurité
+                return HttpResponse(
+                    url=current,
+                    history=history,
+                    error=f"Erreur inattendue: {exc}",
+                    elapsed_ms=int((time.perf_counter() - started) * 1000),
+                )
+
+            location = response_headers.get("location", "")
+            if not follow_redirects or status not in REDIRECT_STATUSES or not location:
+                return HttpResponse(
+                    url=final_url,
+                    status=status,
+                    headers=response_headers,
                     body=body,
                     history=history,
                     elapsed_ms=int((time.perf_counter() - started) * 1000),
                 )
-        except httpx.TooManyRedirects as exc:
-            return HttpResponse(url=str(url), error=f"Trop de redirections ({exc})")
-        except httpx.TimeoutException:
-            return HttpResponse(url=str(url), error="Délai dépassé")
-        except httpx.HTTPError as exc:
-            return HttpResponse(url=str(url), error=f"{type(exc).__name__}: {exc}")
-        except Exception as exc:  # pragma: no cover - filet de sécurité
-            return HttpResponse(url=str(url), error=f"Erreur inattendue: {exc}")
+
+            history.append((final_url, status))
+            try:
+                target = urljoin(final_url, location.strip())
+            except Exception:
+                return HttpResponse(url=final_url, status=status, error="Redirection illisible.")
+
+            scheme = (urlsplit(target).scheme or "").lower()
+            if scheme not in {"http", "https"}:
+                return HttpResponse(
+                    url=final_url,
+                    status=status,
+                    history=history,
+                    error=(
+                        f"Redirection bloquée : schéma « {scheme or 'absent'} » non autorisé "
+                        "(protection anti-SSRF)."
+                    ),
+                    blocked=True,
+                    elapsed_ms=int((time.perf_counter() - started) * 1000),
+                )
+
+            if status == 303 or (status in {301, 302} and method == "POST"):
+                method = "GET"
+            current = target
+
+        return HttpResponse(
+            url=current,
+            history=history,
+            error=f"Trop de redirections (limite : {config.MAX_REDIRECTS}).",
+            elapsed_ms=int((time.perf_counter() - started) * 1000),
+        )
 
     async def get(self, url: str, **kwargs: object) -> HttpResponse:
         return await self.request("GET", url, **kwargs)  # type: ignore[arg-type]

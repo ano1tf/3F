@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import dns.asyncresolver
 import dns.exception
-import httpx
 
 from . import config, db
 from .safety import ScanError, normalize_target, validate_target
@@ -48,24 +47,29 @@ async def check_dns(host: str, token: str) -> bool:
 
 
 async def check_file(host: str, token: str) -> bool:
-    """Vérifie `/.well-known/vulnlens.txt` (HTTPS puis HTTP en repli)."""
-    for scheme in ("https", "http"):
-        try:
-            await validate_target(f"{scheme}://{host}/", allow_private=True)
-        except ScanError:
-            continue
-        try:
-            async with httpx.AsyncClient(
-                timeout=8.0,
-                follow_redirects=True,
-                verify=False if scheme == "http" else True,
-                headers={"User-Agent": config.USER_AGENT},
-            ) as client:
-                response = await client.get(f"{scheme}://{host}{FILE_PATH}")
-        except Exception:  # noqa: BLE001
-            continue
-        if response.status_code == 200 and token in response.text[:4096]:
-            return True
+    """Vérifie `/.well-known/vulnlens.txt` (HTTPS puis HTTP en repli).
+
+    Le téléchargement passe par le `Fetcher` gardé : les hôtes internes
+    (localhost, 169.254.169.254, *.internal…) sont refusés et chaque redirection
+    est revalidée. Auparavant, cette fonction forçait `allow_private=True`, ce qui
+    permettait un SSRF via `POST /api/verify/<hôte interne>/check`.
+    """
+    from .scanner.fetcher import Fetcher
+
+    allow_private = config.ALLOW_PRIVATE_TARGETS
+    async with Fetcher(allow_private=allow_private) as fetcher:
+        for scheme in ("https", "http"):
+            try:
+                await validate_target(f"{scheme}://{host}/", allow_private=allow_private)
+            except ScanError:
+                continue
+            response = await fetcher.get(
+                f"{scheme}://{host}{FILE_PATH}", max_bytes=4096, timeout=8
+            )
+            if response.error or response.status != 200:
+                continue
+            if token in response.text[:4096]:
+                return True
     return False
 
 

@@ -14,7 +14,9 @@ import socket
 import string
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
+from .. import config
 from ..models import Finding, Severity
+from ..safety import is_public_ip
 from . import recon_ct
 from .fetcher import Fetcher, HttpResponse
 
@@ -100,6 +102,12 @@ def _attempt_axfr(host: str) -> tuple[bool, str]:
             addresses = _resolve(nameserver)
             if not addresses:
                 continue
+            # Un domaine peut déclarer des NS internes (10.x, 127.0.0.1…) : sans ce
+            # filtre, l'AXFR ouvrait une connexion TCP vers le réseau de l'instance.
+            if not config.ALLOW_PRIVATE_TARGETS:
+                addresses = [addr for addr in addresses if is_public_ip(addr)]
+                if not addresses:
+                    continue
             zone = dns.zone.from_xfr(dns.query.xfr(addresses[0], host, lifetime=8))
             records = [str(node) for node in list(zone.nodes.keys())[:10]]
             return True, f"{len(zone.nodes)} nœuds via {nameserver} ({', '.join(records[:5])}…)"

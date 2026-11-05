@@ -8,7 +8,7 @@ Aucune exploitation, aucune injection, aucun contournement d'authentification : 
 visiteur peut observer.
 
 ```
-┌ VulnLens v6.0 ─────────────────────────────────────────────────────────────┐
+┌ VulnLens v6.1 ─────────────────────────────────────────────────────────────┐
 │  Risque critique · score 8/100     3 pages · 11 familles de contrôles      │
 ├────────────────────────────────────────────────────────────────────────────┤
 │  « Des accès ou des données sont exposés : à traiter immédiatement. »      │
@@ -18,6 +18,20 @@ visiteur peut observer.
 ```
 
 ---
+
+## Ce que fait la v6.1 — durcissement de l'instance
+
+| Correctif | Détail |
+|---|---|
+| **SSRF par redirection** | Chaque saut de redirection est revalidé : un `302` vers `169.254.169.254` ou un service interne est refusé, plus aucun contenu interne ne remonte dans le rapport. |
+| **SSRF dans la vérification de domaine** | `/api/verify/{hôte}/check` passe par le client gardé (fini le `allow_private=True` codé en dur). |
+| **Limitation de débit fiable** | `X-Forwarded-For` n'est plus cru sur parole (`VULNLENS_TRUST_PROXY`), et `/api/verify/*/check` / `/api/watch/*/run` sont limités. |
+| **Anti-CSRF** | Les `POST` sans corps sont refusés si l'origine ne correspond pas à l'instance. |
+| **En-têtes de sécurité** | CSP stricte (`default-src 'self'`, `frame-ancestors 'none'`), `nosniff`, `Referrer-Policy`, COOP/CORP, HSTS, Permissions-Policy sur toutes les réponses. |
+| **Exports neutralisés** | Rapport HTML servi en pièce jointe avec `CSP: sandbox` ; nom de fichier filtré. |
+| **Moins de fuites** | Comparaison de jeton à temps constant, erreurs internes masquées au client, webhook sortant validé. |
+
+Détail complet, preuves et risques résiduels : **[SECURITY.md](SECURITY.md)**.
 
 ## Ce que fait la v6
 
@@ -173,7 +187,10 @@ empreinte technique, **pages analysées**, contrôles exécutés avec leur duré
 | `POST` | `/api/verify/{hôte}/check` | Vérifie DNS puis fichier, persiste le résultat |
 
 Si `VULNLENS_TOKEN` est défini, toutes les routes `/api/*` (sauf `/api/health`) exigent
-`Authorization: Bearer <jeton>` ou `X-API-Key: <jeton>`.
+`Authorization: Bearer <jeton>` ou `X-API-Key: <jeton>`. Sans jeton, l'instance est
+ouverte : un avertissement est écrit au démarrage. Toutes les réponses portent une CSP
+stricte et les en-têtes de durcissement (`nosniff`, `frame-ancestors 'none'`, HSTS…).
+Les méthodes d'écriture sont protégées contre le CSRF par contrôle d'origine.
 
 ---
 
@@ -191,6 +208,8 @@ Si `VULNLENS_TOKEN` est défini, toutes les routes `/api/*` (sauf `/api/health`)
 | `VULNLENS_ALERT_ON_CRITICAL` | `1` | Alerte à l'apparition d'un constat critique |
 | `VULNLENS_CONTACT` | `security@example.org` | Contact dans le User-Agent |
 | `VULNLENS_DB` | `data/vulnlens.db` | Base SQLite |
+| `VULNLENS_TRUST_PROXY` | `0` | Fait confiance à `X-Forwarded-For` / `X-Forwarded-Host` (uniquement derrière un reverse proxy maîtrisé) |
+| `VULNLENS_ALLOWED_ORIGINS` | vide | Origines supplémentaires autorisées à appeler l'API (liste séparée par des virgules) |
 
 Charge utile d'alerte : `scan_id`, `host`, `score`, `previous_score`, `delta`, `reason`,
 `counts`, `priorities` (3 premiers constats avec titre, sévérité, remédiation), `report_url`.
@@ -243,7 +262,7 @@ liste des pages concernées, pour éviter les rapports de 300 lignes répétitiv
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest        # 217 tests
+.venv/bin/python -m pytest        # 247 tests (dont 30 de durcissement)
 .venv/bin/ruff check .
 
 # interface : rendu simulé (jsdom), aucune erreur JavaScript tolérée
@@ -255,8 +274,9 @@ Couverture : normalisation et refus de cibles, scoring, en-têtes, contenu, DNS/
 **agrégation**, **diff**, **alertes**, **vérification**, **takeover**, **secrets**, **e-mail**,
 **surface tierce**, **plan de remédiation**, **synthèse exécutive**, **surveillance**, **Certificate
 Transparency**, **empreinte technique**, persistance, API (historique, exports, jeton, diff, plan,
-watch, trend, verify), CLI (`scan`, `verify`, `watch`), et un **test de fumée de l'interface** sous
-jsdom. Fixture serveur volontairement vulnérable : 3 pages, clé AWS factice, source map exposée.
+watch, trend, verify), **sécurité de l'instance** (SSRF par redirection, SSRF de la
+vérification, AXFR interne, contournement de débit, CSRF, en-têtes, fuite d'erreurs),
+CLI (`scan`, `verify`, `watch`), et un **test de fumée de l'interface** sous jsdom. Fixture serveur volontairement vulnérable : 3 pages, clé AWS factice, source map exposée.
 
 ---
 

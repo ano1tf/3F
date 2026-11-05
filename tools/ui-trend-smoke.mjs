@@ -1,7 +1,11 @@
 import { JSDOM, VirtualConsole } from "jsdom";
 import fs from "node:fs";
-const html = fs.readFileSync("/home/user/3F/app/static/index.html", "utf8");
-const js = fs.readFileSync("/home/user/3F/app/static/app.js", "utf8");
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const html = fs.readFileSync(path.join(ROOT, "app/static/index.html"), "utf8");
+const js = fs.readFileSync(path.join(ROOT, "app/static/app.js"), "utf8");
 const errors = [];
 const vc = new VirtualConsole();
 vc.on("jsdomError", (e) => errors.push(e.message));
