@@ -25,7 +25,7 @@
         </svg>
       </span>
       <span class="brand-name">VulnLens</span>
-      <span class="brand-tag">v2.0</span>
+      <span class="brand-tag">v3.0</span>
     </a>
     <nav class="topnav">
       <button class="nav-btn" id="nav-analyzer" type="button" aria-pressed="true">Analyser</button>
@@ -72,10 +72,17 @@
             </span>
           </label>
           <label class="profile-option">
+            <input type="radio" name="profile" value="standard" />
+            <span class="profile-box">
+              <span class="profile-name">Standard</span>
+              <span class="profile-detail">Jusqu'à 6 pages, en-têtes et contenu agrégés</span>
+            </span>
+          </label>
+          <label class="profile-option">
             <input type="radio" name="profile" value="deep" />
             <span class="profile-box">
               <span class="profile-name">Approfondi</span>
-              <span class="profile-detail">Tout + AXFR, sous-domaines, redirections ouvertes</span>
+              <span class="profile-detail">12 pages + AXFR, sous-domaines, takeovers, redirections</span>
             </span>
           </label>
         </fieldset>
@@ -132,6 +139,10 @@
             <p class="mono target-url" id="result-target"></p>
             <p class="muted" id="result-meta"></p>
             <p class="comparison" id="comparison" hidden></p>
+            <p class="verify-line">
+              <span class="verified-badge" id="verify-badge" hidden>✓ Domaine vérifié</span>
+              <button class="btn-ghost btn-mini" id="verify-open" type="button">Vérifier la propriété</button>
+            </p>
           </div>
         </div>
         <div class="summary-right">
@@ -171,6 +182,24 @@
         Aucun constat pour ce filtre. 🌤️
       </p>
 
+      <article class="panel" id="diff-panel" hidden>
+        <div class="panel-head">
+          <h2>Évolution depuis la dernière analyse</h2>
+          <span class="muted small" id="diff-caption"></span>
+        </div>
+        <div class="diff-cols">
+          <div class="diff-col">
+            <h3><span class="diff-dot new"></span> Nouveaux constats</h3>
+            <ul id="diff-new"></ul>
+          </div>
+          <div class="diff-col">
+            <h3><span class="diff-dot fixed"></span> Constats corrigés</h3>
+            <ul id="diff-fixed"></ul>
+          </div>
+        </div>
+        <p class="muted small" id="diff-persistent"></p>
+      </article>
+
       <article class="panel" id="breakdown-panel">
         <div class="panel-head">
           <h2>Composition du score</h2>
@@ -189,6 +218,14 @@
           <ul class="checks" id="checks"></ul>
         </article>
       </div>
+
+      <article class="panel" id="pages-panel" hidden>
+        <div class="panel-head">
+          <h2>Pages analysées</h2>
+          <span class="muted small" id="pages-count"></span>
+        </div>
+        <ul class="pages" id="pages-list"></ul>
+      </article>
 
       <article class="panel" id="history-panel" hidden>
         <div class="panel-head">
@@ -309,6 +346,34 @@
       </div>
     </article>
   </template>
+
+  <dialog id="verify-dialog" class="verify-dialog">
+    <form method="dialog" class="dialog-head">
+      <h2>Prouver la propriété du domaine</h2>
+      <button class="dialog-x" value="close" aria-label="Fermer">✕</button>
+    </form>
+    <p class="muted small">
+      Publiez l'une de ces deux preuves, puis lancez la vérification. Le jeton n'est pas un secret :
+      il prouve seulement que vous contrôlez le domaine.
+    </p>
+    <div class="verify-option">
+      <h3>1. Enregistrement DNS (recommandé)</h3>
+      <pre class="mono" id="verify-dns"></pre>
+      <button class="btn-ghost btn-mini" id="copy-dns" type="button">Copier</button>
+    </div>
+    <div class="verify-option">
+      <h3>2. Fichier .well-known</h3>
+      <pre class="mono" id="verify-file"></pre>
+      <button class="btn-ghost btn-mini" id="copy-file" type="button">Copier</button>
+    </div>
+    <p id="verify-status" class="muted small"></p>
+    <div class="dialog-actions">
+      <button class="btn-primary" id="verify-now" type="button">
+        <span class="btn-label">Vérifier maintenant</span>
+      </button>
+      <button class="btn-ghost" id="verify-close" type="button">Fermer</button>
+    </div>
+  </dialog>
 
   <script src="/static/app.js"></script>
 </body>

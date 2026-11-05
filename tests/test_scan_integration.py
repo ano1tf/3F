@@ -81,3 +81,31 @@ def test_unreachable_target_reports_error(monkeypatch):
     with pytest.raises(ScanError) as excinfo:
         asyncio.run(run_scan("http://127.0.0.1:1/", emit))
     assert excinfo.value.code == "unreachable"
+
+
+def test_standard_profile_aggregates_pages(vulnerable_server):
+    """Le profil standard explore les pages internes et agrège les constats."""
+    events: list[dict] = []
+
+    async def emit(payload: dict) -> None:
+        events.append(payload)
+
+    report = asyncio.run(run_scan(vulnerable_server.url, emit, profile="standard"))
+
+    assert report.profile == "standard"
+    assert len(report.pages) >= 2
+    urls = " ".join(page["url"] for page in report.pages)
+    assert "/about" in urls and "/contact" in urls
+    # Une même famille de problème devient un seul constat enrichi.
+    aggregated = next(f for f in report.findings if f.id == "headers.missing.referrer-policy")
+    assert "pages analysées" in aggregated.evidence.lower()
+    assert "http://127.0.0.1" in aggregated.evidence
+
+
+def test_quick_profile_stays_single_page(vulnerable_server):
+    async def emit(_payload: dict) -> None:
+        return None
+
+    report = asyncio.run(run_scan(vulnerable_server.url, emit, profile="quick"))
+    assert report.profile == "quick"
+    assert len(report.pages) == 1

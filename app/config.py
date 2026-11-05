@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 APP_NAME = "VulnLens"
-APP_VERSION = "2.0.0"
+APP_VERSION = "3.0.0"
 APP_TAGLINE = "Scanner de vulnérabilités web — en un clic"
 
 # Identité envoyée aux cibles scannées (transparence : on ne se cache pas).
@@ -27,3 +27,13 @@ ALLOW_PRIVATE_TARGETS = os.getenv("VULNLENS_ALLOW_PRIVATE", "0") in {"1", "true"
 
 # Une analyse ne doit jamais durer plus longtemps que ça.
 SCAN_DEADLINE_SECONDS = float(os.getenv("VULNLENS_SCAN_DEADLINE", "120"))
+
+# --- Alertes sortantes (webhook) -------------------------------------------
+WEBHOOK_URL = os.getenv("VULNLENS_WEBHOOK_URL", "").strip()
+_env_threshold = os.getenv("VULNLENS_ALERT_THRESHOLD", "").strip()
+ALERT_THRESHOLD = int(_env_threshold) if _env_threshold.isdigit() else None
+ALERT_MIN_DROP = int(os.getenv("VULNLENS_ALERT_MIN_DROP", "10"))
+ALERT_ON_CRITICAL = os.getenv("VULNLENS_ALERT_ON_CRITICAL", "1") in {"1", "true", "yes"}
+
+# --- Protection de l'instance (vide = pas d'authentification) ---------------
+AUTH_TOKEN = os.getenv("VULNLENS_TOKEN", "").strip()

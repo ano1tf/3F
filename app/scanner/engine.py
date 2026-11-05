@@ -9,10 +9,12 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from urllib.parse import urlsplit, urlunsplit
 
-from .. import config
+from .. import config, verify
 from ..models import CheckResult, Finding, ScanReport
 from ..safety import ScanError, validate_target
 from . import checks_content, checks_deep, checks_dns, checks_exposure, checks_http, checks_tls
+from .aggregate import aggregate, coverage_note
+from .crawl import CrawlPage, crawl
 from .fetcher import Fetcher, same_origin
 from .scoring import (
     compute_breakdown,
@@ -25,9 +27,16 @@ from .scoring import (
 
 Emitter = Callable[[dict], Awaitable[None]]
 
+PROFILES: dict[str, dict] = {
+    "quick": {"pages": 1, "deep": False, "label": "Rapide"},
+    "standard": {"pages": 6, "deep": False, "label": "Standard"},
+    "deep": {"pages": 12, "deep": True, "label": "Approfondi"},
+}
+
 STEPS = [
     ("validation", "Validation de la cible et des garde-fous"),
     ("transport", "Négociation TLS et transport"),
+    ("crawl", "Exploration des pages internes"),
     ("headers", "Analyse des en-têtes de sécurité"),
     ("dns", "Vérification DNS, SPF et DMARC"),
     ("cors", "Test CORS et méthodes HTTP"),
@@ -54,18 +63,22 @@ def dedupe(findings: list[Finding]) -> list[Finding]:
     return unique
 
 
-async def run_scan(raw_target: str, emit: Emitter, profile: str = "quick") -> ScanReport:
+async def run_scan(
+    raw_target: str,
+    emit: Emitter,
+    profile: str = "quick",
+) -> ScanReport:
     started = time.perf_counter()
+    selected = PROFILES.get(profile, PROFILES["quick"])
     report = ScanReport(
         target=raw_target.strip(),
         started_at=datetime.now(UTC).isoformat(timespec="seconds"),
         scan_id=uuid.uuid4().hex[:12],
-        profile="deep" if profile == "deep" else "quick",
+        profile=profile if profile in PROFILES else "quick",
     )
     percent = 0
 
     async def step(key: str, message: str | None = None) -> None:
-        nonlocal percent
         label = dict(STEPS).get(key, key)
         await emit(
             {
@@ -83,22 +96,23 @@ async def run_scan(raw_target: str, emit: Emitter, profile: str = "quick") -> Sc
         await step(key, message)
 
     await step("validation")
-    try:
-        target = await validate_target(raw_target)
-    except ScanError as exc:
-        # L'erreur est traduite en événement par la couche API (une seule fois).
-        report.errors.append(exc.message)
-        raise
-
+    target = await validate_target(raw_target)
     report.final_url = target.url
-    await advance("validation", 6, f"Cible validée : {target.host} ({', '.join(target.addresses[:3])})")
+    report.verified = await verify.is_verified(target.host)
+
+    badge = " · domaine vérifié ✓" if report.verified else ""
+    await advance(
+        "validation",
+        6,
+        f"Cible validée : {target.host} ({', '.join(target.addresses[:3])}){badge}",
+    )
 
     findings: list[Finding] = []
     checks: list[CheckResult] = []
 
     async with Fetcher(allow_private=config.ALLOW_PRIVATE_TARGETS) as fetcher:
         # ------------------------------------------------------------------
-        # Phase 1 — transport : page principale, variante HTTP, TLS, DNS
+        # Phase 1 — transport
         # ------------------------------------------------------------------
         await advance("transport", 14, f"Connexion à {target.url}")
         http_url = f"http://{urlsplit(target.url).netloc}/"
@@ -130,7 +144,7 @@ async def run_scan(raw_target: str, emit: Emitter, profile: str = "quick") -> Sc
         report.final_url = response.url
         http_response = await http_task if http_task is not None else None
 
-        transport_findings = checks_http.check_transport(target.url, response, http_response)  # type: ignore[arg-type]
+        transport_findings = checks_http.check_transport(target.url, response, http_response)
         findings.extend(transport_findings)
         checks.append(
             CheckResult(
@@ -156,14 +170,66 @@ async def run_scan(raw_target: str, emit: Emitter, profile: str = "quick") -> Sc
                 )
             )
 
-        await advance("headers", 28, "Contrôle des en-têtes (HSTS, CSP, cookies…)")
-        is_https = urlsplit(response.url).scheme == "https"
-        header_findings = checks_http.check_headers(response, is_https)
-        header_findings += checks_http.check_cookies(response)
-        findings.extend(header_findings)
-        checks.append(CheckResult("headers", "En-têtes & cookies", findings=header_findings))
+        # ------------------------------------------------------------------
+        # Phase 2 — exploration des pages internes
+        # ------------------------------------------------------------------
+        await advance("crawl", 24, f"Exploration des pages internes (max {selected['pages']})")
+        pages: list[CrawlPage] = [CrawlPage(url=response.url, response=response)]
+        skipped = 0
+        try:
+            crawl_result = await crawl(
+                fetcher,
+                target.url,
+                max_pages=int(selected["pages"]),
+                initial=response,
+            )
+            skipped = crawl_result.skipped
+            usable = [page for page in crawl_result.pages if page.ok]
+            if usable:
+                pages = usable
+            report.pages = [page.summary() for page in crawl_result.pages]
+            checks.append(
+                CheckResult(
+                    "crawl",
+                    "Exploration",
+                    detail=coverage_note(len(pages), skipped),
+                    findings=[],
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            checks.append(
+                CheckResult("crawl", "Exploration", status="error", detail=f"Exploration interrompue : {exc}")
+            )
+            report.pages = [{"url": response.url, "status": response.status, "title": "", "ms": 0, "error": ""}]
+        if not report.pages:
+            report.pages = [{"url": response.url, "status": response.status, "title": "", "ms": 0, "error": ""}]
 
-        await advance("dns", 38, "Vérification SPF, DMARC et CAA")
+        is_https = urlsplit(response.url).scheme == "https"
+
+        # ------------------------------------------------------------------
+        # Phase 3 — en-têtes, cookies et contenu, page par page
+        # ------------------------------------------------------------------
+        await advance("headers", 34, f"Contrôle des en-têtes sur {len(pages)} page(s)")
+        headers_per_page = [
+            (
+                page.url,
+                checks_http.check_headers(page.response, is_https)
+                + checks_http.check_cookies(page.response),
+            )
+            for page in pages
+        ]
+        header_findings = aggregate(headers_per_page, len(pages))
+        findings.extend(header_findings)
+        checks.append(
+            CheckResult(
+                "headers",
+                "En-têtes & cookies",
+                detail=f"{len(pages)} page(s)",
+                findings=header_findings,
+            )
+        )
+
+        await advance("dns", 44, "Vérification SPF, DMARC et CAA")
         try:
             dns_findings, dns_meta = await asyncio.wait_for(dns_task, timeout=12)
         except Exception as exc:  # noqa: BLE001
@@ -176,7 +242,7 @@ async def run_scan(raw_target: str, emit: Emitter, profile: str = "quick") -> Sc
             checks.append(CheckResult("dns", "DNS & e-mail", findings=dns_findings))
         report.fingerprint.update(dns_meta)
 
-        await advance("cors", 48, "Test CORS et méthodes HTTP")
+        await advance("cors", 54, "Test CORS et méthodes HTTP")
         try:
             cors_findings, method_findings = await asyncio.gather(
                 checks_http.check_cors(fetcher, response.url),
@@ -192,10 +258,10 @@ async def run_scan(raw_target: str, emit: Emitter, profile: str = "quick") -> Sc
             )
 
         # ------------------------------------------------------------------
-        # Phase 2 — exposition de fichiers (sur l'origine finale)
+        # Phase 4 — exposition de fichiers (sur l'origine finale)
         # ------------------------------------------------------------------
         base = _origin(response.url)
-        await advance("exposure", 62, f"Recherche de fichiers sensibles sur {base}")
+        await advance("exposure", 66, f"Recherche de fichiers sensibles sur {base}")
         exposure_findings: list[Finding] = []
         try:
             exposed, exposure_meta = await checks_exposure.check_exposed_files(fetcher, base)
@@ -212,29 +278,44 @@ async def run_scan(raw_target: str, emit: Emitter, profile: str = "quick") -> Sc
         findings.extend(exposure_findings)
 
         # ------------------------------------------------------------------
-        # Phase 3 — contenu de la page
+        # Phase 5 — contenu HTML, page par page
         # ------------------------------------------------------------------
-        await advance("content", 80, "Analyse du HTML, des formulaires et des scripts")
-        page_findings: list[Finding] = []
+        await advance("content", 78, f"Analyse du contenu de {len(pages)} page(s)")
+        content_per_page = []
+        generator = ""
         try:
-            page_findings, page_info = checks_content.check_page(response)
-            if page_info.generator:
-                report.fingerprint.setdefault("generateur", page_info.generator)
-            checks.append(CheckResult("content", "Contenu & formulaires", findings=page_findings))
+            for page in pages:
+                page_findings, page_info = checks_content.check_page(page.response)
+                content_per_page.append((page.url, page_findings))
+                if page_info.generator and not generator:
+                    generator = page_info.generator
+            content_findings = aggregate(content_per_page, len(pages))
+            checks.append(
+                CheckResult(
+                    "content",
+                    "Contenu & formulaires",
+                    detail=f"{len(pages)} page(s)",
+                    findings=content_findings,
+                )
+            )
         except Exception as exc:  # noqa: BLE001
+            content_findings = []
             checks.append(CheckResult("content", "Contenu & formulaires", status="error", detail=str(exc)))
-        findings.extend(page_findings)
+        findings.extend(content_findings)
+        if generator:
+            report.fingerprint.setdefault("generateur", generator)
 
         headers_map = {k.lower(): v for k, v in response.headers.items()}
         headers_map["__url__"] = response.url
         report.fingerprint.update(checks_exposure.detect_fingerprint(headers_map, response.text))
-        if same_origin(target.url, response.url) is False:
+        report.fingerprint["pages_analysees"] = str(len(pages))
+        if not same_origin(target.url, response.url):
             report.fingerprint["redirige_vers"] = response.url
 
         # ------------------------------------------------------------------
-        # Phase 3 bis — contrôles approfondis (profil « deep » uniquement)
+        # Phase 6 — contrôles approfondis (profil « deep »)
         # ------------------------------------------------------------------
-        if report.profile == "deep":
+        if selected["deep"]:
             await advance("deep", 88, "AXFR, sous-domaines et redirections ouvertes")
             deep_findings: list[Finding] = []
             try:
@@ -252,25 +333,18 @@ async def run_scan(raw_target: str, emit: Emitter, profile: str = "quick") -> Sc
             findings.extend(deep_findings)
 
         # ------------------------------------------------------------------
-        # Phase 4 — score
+        # Phase 7 — score
         # ------------------------------------------------------------------
-        await advance("score", 94, "Calcul du score et classement des constats")
+        await advance("score", 95, "Calcul du score et classement des constats")
         findings = dedupe(findings)
         report.findings = sort_findings(findings)
         report.score = score_findings(report.findings)
         report.grade, _ = grade_for(report.score)
         report.score_breakdown = compute_breakdown(report.findings)
         report.priorities = [f.id for f in priorities(report.findings)]
-        # Les constats d'un domaine redirigé ne doivent pas compter deux fois.
         report.counts = count_by_severity(report.findings)
         report.checks = checks
         report.duration_ms = int((time.perf_counter() - started) * 1000)
 
-    await emit(
-        {
-            "type": "result",
-            "percent": 100,
-            "report": report.to_dict(),
-        }
-    )
+    await emit({"type": "result", "percent": 100, "report": report.to_dict()})
     return report

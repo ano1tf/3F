@@ -118,3 +118,60 @@ def test_markdown_report_lists_findings():
     assert markdown.startswith("# Rapport VulnLens")
     assert "Dépôt Git exposé" in markdown
     assert "**Remédiation :**" in markdown
+
+
+def enriched_report() -> dict:
+    report = sample_report()
+    report["profile"] = "standard"
+    report["verified"] = True
+    report["pages"] = [
+        {"url": "https://cible.test/", "status": 200, "title": "Accueil", "ms": 40},
+        {"url": "https://cible.test/contact", "status": 200, "title": "Contact", "ms": 35},
+    ]
+    report["diff"] = {
+        "available": True,
+        "previous_score": 40,
+        "score_delta": 22,
+        "previous_at": "2026-03-01T09:00:00+00:00",
+        "new": [{"id": "x", "title": "Nouveau souci", "severity": "high", "severity_label": "Élevée"}],
+        "fixed": [{"id": "y", "title": "Ancien souci", "severity": "critical", "severity_label": "Critique"}],
+        "summary": {"new": 1, "fixed": 1, "persistent": 3},
+    }
+    return report
+
+
+def test_html_shows_verified_badge_pages_and_diff():
+    html = reporting.to_html(enriched_report())
+    assert "Domaine vérifié" in html
+    assert "Pages analysées (2)" in html
+    assert "https://cible.test/contact" in html
+    assert "Évolution depuis la dernière analyse" in html
+    assert "Nouveau souci" in html and "Ancien souci" in html
+    assert "+22 pts" in html
+
+
+def test_html_marks_unverified_domain():
+    html = reporting.to_html(sample_report())
+    assert "Domaine non vérifié" in html
+    assert "Domaine vérifié" not in html
+
+
+def test_html_omits_pages_block_for_single_page():
+    report = sample_report()
+    report["pages"] = [{"url": "https://cible.test/", "status": 200, "title": "Accueil"}]
+    assert "Pages analysées" not in reporting.to_html(report)
+
+
+def test_markdown_reports_verification_and_diff():
+    markdown = reporting.to_markdown(enriched_report())
+    assert "vérifiée ✓" in markdown
+    assert "+22 pts" in markdown
+    assert "Pages analysées" in markdown
+
+
+def test_sarif_exposes_domain_metadata():
+    sarif = reporting.to_sarif(enriched_report())
+    properties = sarif["runs"][0]["properties"]
+    assert properties["domainVerified"] is True
+    assert properties["pagesAnalyzed"] == 2
+    assert "https://cible.test/contact" in properties["pages"]

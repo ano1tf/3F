@@ -13,10 +13,11 @@ import asyncio
 import json
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
-from . import config, db, reporting
+from . import config, db, reporting, verify
 from .models import Severity
-from .safety import ScanError
+from .safety import ScanError, normalize_target
 from .scanner.engine import run_scan
 
 EXIT_OK = 0
@@ -54,6 +55,38 @@ def _print_summary(report) -> None:
             print(f"  {finding.severity.value.upper():8} {finding.title}", file=sys.stderr)
 
 
+async def _verify(host: str, show_token_only: bool) -> int:
+    try:
+        domain = urlsplit(normalize_target(host)).hostname or host
+    except ScanError as exc:
+        print(f"Domaine invalide : {exc.message}", file=sys.stderr)
+        return EXIT_ERROR
+
+    info = await verify.status(domain)
+    if show_token_only:
+        print(info["token"])
+        return EXIT_OK
+
+    instructions = info["instructions"]
+    print(f"Domaine        : {domain}")
+    print(f"Jeton          : {info['token']}")
+    print(f"Déjà vérifié   : {'oui' if info['verified'] else 'non'}")
+    print()
+    print("Option A — enregistrement DNS :")
+    print(f"  {instructions['record_name']}  TXT  \"{instructions['record_value']}\"")
+    print()
+    print("Option B — fichier :")
+    print(f"  {instructions['file_url']}  →  {info['token']}")
+    print()
+
+    result = await verify.verify(domain)
+    if result["verified"]:
+        print(f"✓ Propriété confirmée via {result['method']}.")
+        return EXIT_OK
+    print(f"✗ {result['detail']}")
+    return EXIT_THRESHOLD
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="vulnlens",
@@ -65,9 +98,9 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("url", help="Domaine ou URL à analyser")
     scan.add_argument(
         "--profile",
-        choices=["quick", "deep"],
-        default="quick",
-        help="quick : contrôles passifs (défaut) ; deep : + AXFR, sous-domaines, redirections",
+        choices=["quick", "standard", "deep"],
+        default="standard",
+        help="quick : 1 page ; standard : 6 pages (défaut) ; deep : 12 pages + AXFR, sous-domaines, takeovers",
     )
     scan.add_argument(
         "--format",
@@ -86,6 +119,16 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--no-save", action="store_true", help="Ne pas enregistrer dans l'historique")
     scan.add_argument("--verbose", "-v", action="store_true", help="Afficher la progression")
     scan.add_argument("--quiet", "-q", action="store_true", help="N'afficher que le rapport")
+
+    verify_parser = sub.add_parser(
+        "verify", help="Vérifier la propriété d'un domaine (DNS TXT ou .well-known)"
+    )
+    verify_parser.add_argument("host", help="Domaine à vérifier")
+    verify_parser.add_argument(
+        "--show-token",
+        action="store_true",
+        help="Afficher uniquement le jeton et les instructions",
+    )
 
     return parser
 
@@ -117,6 +160,9 @@ def _render(report_dict: dict, fmt: str) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.command == "verify":
+        return asyncio.run(_verify(args.host, args.show_token))
 
     if args.command != "scan":  # pragma: no cover - argparse gère déjà
         parser.print_help()

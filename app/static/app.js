@@ -227,6 +227,10 @@
             gotResult = true;
             finishSteps();
             renderReport(event.report);
+          } else if (event.type === "saved") {
+            if (currentReport && currentReport.scan_id === event.scan_id) {
+              fetchDiff(currentReport);
+            }
           } else if (event.type === "error") {
             showError(event.message || "Erreur inconnue.");
           }
@@ -314,6 +318,9 @@
     }
     renderComparison(report);
     renderHistory();
+    renderVerification(report);
+    renderPages(report);
+    $("#diff-panel").hidden = true;
 
     results.scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -871,7 +878,13 @@
 
     scans.forEach((scan) => {
       const row = document.createElement("tr");
-      row.appendChild(el("td", "scan-host", scan.host));
+      const hostCell = el("td", "scan-host", scan.host);
+      if (scan.verified) {
+        const badge = el("span", "verified-mini", "✓");
+        badge.title = "Domaine vérifié";
+        hostCell.appendChild(badge);
+      }
+      row.appendChild(hostCell);
       row.appendChild(el("td", "scan-date", formatDate(scan.created_at)));
       const profile = el("td");
       profile.appendChild(el("span", `scan-profile ${scan.profile === "deep" ? "deep" : ""}`, scan.profile));
@@ -939,6 +952,170 @@
     return String(value).replace(/[&<>"']/g, (char) => ({
       "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
     })[char]);
+  }
+
+  /* --------------------- Vérification de propriété ------------------------ */
+
+  let verifyHost = null;
+
+  function renderVerification(report) {
+    const verified = Boolean(report.verified);
+    $("#verify-badge").hidden = !verified;
+    $("#verify-open").textContent = verified ? "Voir la preuve" : "Vérifier la propriété";
+  }
+
+  async function openVerifyDialog() {
+    const host = hostOf(currentReport || { target: input.value, final_url: "" });
+    if (!host) return;
+    verifyHost = host;
+    const status = $("#verify-status");
+    status.textContent = "Chargement du jeton…";
+    status.className = "muted small";
+    $("#verify-dns").textContent = "";
+    $("#verify-file").textContent = "";
+    const dialog = $("#verify-dialog");
+    if (typeof dialog.showModal === "function") dialog.showModal();
+    else dialog.setAttribute("open", "");
+
+    try {
+      const response = await fetch(`/api/verify/${encodeURIComponent(host)}`);
+      if (!response.ok) throw new Error("Domaine invalide");
+      const data = await response.json();
+      $("#verify-dns").textContent =
+        `${data.instructions.record_name}  TXT  ${data.instructions.record_value}`;
+      $("#verify-file").textContent =
+        `${data.instructions.file_url}\n\n${data.token}`;
+      if (data.verified) {
+        status.className = "small ok";
+        status.textContent = `Déjà vérifié (${data.method}) le ${formatDate(data.verified_at)}.`;
+      } else {
+        status.className = "muted small";
+        status.textContent = "Aucune preuve enregistrée pour ce domaine.";
+      }
+    } catch (error) {
+      status.className = "small ko";
+      status.textContent = error.message;
+    }
+  }
+
+  function closeVerifyDialog() {
+    const dialog = $("#verify-dialog");
+    if (typeof dialog.close === "function") dialog.close();
+    else dialog.removeAttribute("open");
+  }
+
+  async function runVerify() {
+    if (!verifyHost) return;
+    const button = $("#verify-now");
+    const status = $("#verify-status");
+    button.disabled = true;
+    button.querySelector(".btn-label").textContent = "Vérification…";
+    status.className = "muted small";
+    status.textContent = "Interrogation du DNS et du fichier .well-known…";
+
+    try {
+      const response = await fetch(`/api/verify/${encodeURIComponent(verifyHost)}/check`, {
+        method: "POST",
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Vérification impossible");
+      if (data.verified) {
+        status.className = "small ok";
+        status.textContent = `Vérifié ✓ (${data.method}) — ${data.detail}`;
+        $("#verify-badge").hidden = false;
+        $("#verify-open").textContent = "Voir la preuve";
+        if (currentReport) currentReport.verified = true;
+      } else {
+        status.className = "small ko";
+        status.textContent = data.detail;
+      }
+    } catch (error) {
+      status.className = "small ko";
+      status.textContent = error.message;
+    } finally {
+      button.disabled = false;
+      button.querySelector(".btn-label").textContent = "Vérifier maintenant";
+    }
+  }
+
+  /* --------------------------- Pages analysées ---------------------------- */
+
+  function renderPages(report) {
+    const panel = $("#pages-panel");
+    const list = $("#pages-list");
+    const pages = report.pages || [];
+    list.innerHTML = "";
+    if (pages.length <= 1) {
+      panel.hidden = true;
+      return;
+    }
+    panel.hidden = false;
+    $("#pages-count").textContent = `${pages.length} page(s) explorée(s)`;
+
+    pages.forEach((page) => {
+      const li = el("li");
+      const status = el("span", `page-status ${page.status && page.status < 400 ? "ok" : ""}`, String(page.status || "—"));
+      li.appendChild(status);
+      li.appendChild(el("span", null, page.url));
+      if (page.title) li.appendChild(el("span", "page-title", page.title));
+      list.appendChild(li);
+    });
+  }
+
+  /* ------------------------------- Diff ---------------------------------- */
+
+  async function fetchDiff(report) {
+    const panel = $("#diff-panel");
+    if (!report || !report.scan_id) {
+      panel.hidden = true;
+      return;
+    }
+    try {
+      const response = await fetch(`/api/scans/${report.scan_id}/diff`);
+      if (!response.ok) {
+        panel.hidden = true;
+        return;
+      }
+      renderDiff(await response.json());
+    } catch (_) {
+      panel.hidden = true;
+    }
+  }
+
+  function renderDiff(diff) {
+    const panel = $("#diff-panel");
+    if (!diff || !diff.available) {
+      panel.hidden = true;
+      return;
+    }
+    panel.hidden = false;
+
+    const delta = diff.score_delta || 0;
+    const deltaLabel = delta > 0 ? `+${delta} pts` : delta < 0 ? `${delta} pts` : "stable";
+    $("#diff-caption").textContent =
+      `vs analyse du ${formatDate(diff.previous_at)} (score ${diff.previous_score}/100) · ${deltaLabel}`;
+
+    const render = (items, target, emptyLabel) => {
+      const list = $(target);
+      list.innerHTML = "";
+      if (!items.length) {
+        list.appendChild(el("li", "empty", emptyLabel));
+        return;
+      }
+      items.forEach((item) => {
+        const li = el("li");
+        const sev = el("span", "diff-sev", severityLabel(item.severity));
+        sev.dataset.sev = item.severity;
+        li.appendChild(sev);
+        li.appendChild(el("span", null, item.title));
+        list.appendChild(li);
+      });
+    };
+
+    render(diff.new || [], "#diff-new", "Aucun nouveau constat");
+    render(diff.fixed || [], "#diff-fixed", "Aucun constat corrigé");
+    $("#diff-persistent").textContent =
+      `${(diff.summary && diff.summary.persistent) || 0} constat(s) toujours présent(s).`;
   }
 
   /* --------------------------- Exports serveur ---------------------------- */
@@ -1055,6 +1232,19 @@
     input.focus();
   });
   $("#export-html").addEventListener("click", () => openServerExport("html"));
+  $("#verify-open").addEventListener("click", openVerifyDialog);
+  $("#verify-close").addEventListener("click", closeVerifyDialog);
+  $("#verify-now").addEventListener("click", runVerify);
+  $("#copy-dns").addEventListener("click", async () => {
+    await copyText($("#verify-dns").textContent);
+    $("#copy-dns").textContent = "Copié ✓";
+    setTimeout(() => ($("#copy-dns").textContent = "Copier"), 1500);
+  });
+  $("#copy-file").addEventListener("click", async () => {
+    await copyText($("#verify-file").textContent);
+    $("#copy-file").textContent = "Copié ✓";
+    setTimeout(() => ($("#copy-file").textContent = "Copier"), 1500);
+  });
   $("#export-sarif").addEventListener("click", () => openServerExport("sarif"));
   $("#clear-history").addEventListener("click", clearHistory);
   $("#export-json").addEventListener("click", downloadJson);

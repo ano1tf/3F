@@ -126,6 +126,9 @@ def to_sarif(report: dict[str, Any]) -> dict[str, Any]:
                     "grade": report.get("grade"),
                     "scanId": report.get("scan_id"),
                     "profile": report.get("profile", "quick"),
+                    "domainVerified": bool(report.get("verified")),
+                    "pagesAnalyzed": len(report.get("pages") or []),
+                    "pages": [page.get("url") for page in (report.get("pages") or [])],
                 },
             }
         ],
@@ -141,6 +144,8 @@ def to_markdown(report: dict[str, Any]) -> str:
         f"- **Cible** : {report.get('final_url') or report.get('target')}",
         f"- **Date** : {report.get('started_at', '')}",
         f"- **Durée** : {report.get('duration_ms', 0)} ms",
+        f"- **Propriété** : {'vérifiée ✓' if report.get('verified') else 'non vérifiée (jeton DNS ou .well-known)'}",
+        f"- **Pages analysées** : {len(report.get('pages') or [])}",
         "- **Constats** : "
         + " · ".join(f"{counts.get(key, 0)} {label.lower()}" for key, label in (
             ("critical", "Critiques"), ("high", "Élevés"), ("medium", "Moyens"),
@@ -148,6 +153,23 @@ def to_markdown(report: dict[str, Any]) -> str:
         )),
         "",
     ]
+
+    diff = report.get("diff") or {}
+    if diff.get("available"):
+        delta = int(diff.get("score_delta") or 0)
+        lines += [
+            f"**Évolution** : {int(diff.get('previous_score') or 0)} → {report.get('score')} "
+            f"({delta:+d} pts) — {len(diff.get('new') or [])} nouveau(x), "
+            f"{len(diff.get('fixed') or [])} corrigé(s), "
+            f"{(diff.get('summary') or {}).get('persistent', 0)} persistant(s).",
+            "",
+        ]
+
+    pages = report.get("pages") or []
+    if len(pages) > 1:
+        lines.append("## Pages analysées")
+        lines += [f"- `{page.get('status')}` {page.get('url')}" for page in pages]
+        lines.append("")
 
     findings = report.get("findings") or []
     if not findings:
@@ -171,6 +193,18 @@ def to_markdown(report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _diff_items(items: Any) -> str:
+    entries = items or []
+    if not entries:
+        return '<li class="empty">Aucun</li>'
+    return "".join(
+        f'<li><span class="sev">'
+        f'{_e(item.get("severity_label") or item.get("severity", ""))}</span>'
+        f'{_e(item.get("title", ""))}</li>'
+        for item in entries[:12]
+    )
+
+
 def _e(value: Any) -> str:
     return html.escape(str(value or ""))
 
@@ -181,6 +215,9 @@ def to_html(report: dict[str, Any]) -> str:
     findings = report.get("findings") or []
     fingerprint = report.get("fingerprint") or {}
     checks = report.get("checks") or []
+    pages = report.get("pages") or []
+    verified = bool(report.get("verified"))
+    diff = report.get("diff") or {}
     score = int(report.get("score") or 0)
     grade = _e(report.get("grade"))
     target = _e(report.get("final_url") or report.get("target"))
@@ -227,6 +264,42 @@ def to_html(report: dict[str, Any]) -> str:
         for key, value in fingerprint.items()
         if value
     )
+    verify_html = (
+        '<span class="verified">✓ Domaine vérifié</span>'
+        if verified
+        else '<span class="unverified">Domaine non vérifié</span>'
+    )
+
+    diff_html = ""
+    if diff.get("available"):
+        delta = int(diff.get("score_delta") or 0)
+        delta_label = f"+{delta}" if delta > 0 else str(delta)
+        diff_html = f'''
+  <h2>Évolution depuis la dernière analyse</h2>
+  <div class="panel">
+    <p class="delta">Score {int(diff.get("previous_score") or 0)} → {score}
+      (<strong>{delta_label} pts</strong>) · analyse précédente du {_e(diff.get("previous_at", ""))}</p>
+    <div class="diff-cols">
+      <div><h4>Nouveaux constats ({len(diff.get("new") or [])})</h4>
+        <ul class="diff">{_diff_items(diff.get("new"))}</ul></div>
+      <div><h4>Constats corrigés ({len(diff.get("fixed") or [])})</h4>
+        <ul class="diff fixed">{_diff_items(diff.get("fixed"))}</ul></div>
+    </div>
+    <p class="muted">{(diff.get("summary") or {}).get("persistent", 0)} constat(s) toujours présent(s).</p>
+  </div>'''
+
+    pages_html = ""
+    if len(pages) > 1:
+        rows = "".join(
+            f'<li><span class="code">{int(page.get("status") or 0)}</span>'
+            f'<span>{_e(page.get("url"))}</span>'
+            f'<em>{_e(page.get("title", ""))}</em></li>'
+            for page in pages
+        )
+        pages_html = f'''
+  <h2>Pages analysées ({len(pages)})</h2>
+  <div class="panel"><ul class="pages">{rows}</ul></div>'''
+
     checks_html = "".join(
         f'<li><span class="dot {_e(check.get("status", "ok"))}"></span>{_e(check.get("label", ""))}'
         f'<em>{len(check.get("findings") or [])} constat(s)</em></li>'
@@ -289,6 +362,24 @@ def to_html(report: dict[str, Any]) -> str:
   ul.checks {{ list-style:none; margin:0; padding:0; display:grid; gap:8px; }}
   ul.checks li {{ display:flex; align-items:center; gap:8px; font-size:13px; }}
   ul.checks em {{ margin-left:auto; color:var(--muted); font-style:normal; font-size:11.5px; }}
+  .verified {{ display:inline-block; margin-left:8px; font-size:11px; font-weight:700; color:#1b8a5a;
+               background:#e8f6ee; border:1px solid #9fd9b8; border-radius:999px; padding:1px 9px; }}
+  .unverified {{ display:inline-block; margin-left:8px; font-size:11px; color:var(--muted);
+                 border:1px dashed #c3cddb; border-radius:999px; padding:1px 9px; }}
+  .delta {{ margin:0 0 12px; font-size:13.5px; }}
+  .diff-cols {{ display:grid; grid-template-columns:1fr 1fr; gap:20px; }}
+  ul.diff {{ margin:0; padding-left:18px; font-size:13px; }}
+  ul.diff li {{ margin:4px 0; }}
+  ul.diff li .sev {{ font-size:10.5px; text-transform:uppercase; letter-spacing:.06em; color:#c0223a; margin-right:6px; }}
+  ul.diff.fixed li .sev {{ color:#1b8a5a; }}
+  ul.diff li.empty {{ list-style:none; margin-left:-18px; color:var(--muted); font-style:italic; }}
+  ul.pages {{ list-style:none; margin:0; padding:0; font-size:12.5px; }}
+  ul.pages li {{ display:flex; gap:10px; align-items:baseline; padding:5px 0; border-bottom:1px dashed var(--line);
+                 word-break:break-all; }}
+  ul.pages li:last-child {{ border-bottom:0; }}
+  ul.pages .code {{ font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11px; color:#1b8a5a; }}
+  ul.pages em {{ margin-left:auto; color:var(--muted); font-style:normal; font-size:11.5px; }}
+  .muted {{ color:var(--muted); font-size:12.5px; }}
   .dot {{ width:9px; height:9px; border-radius:50%; background:#1b8a5a; }}
   .dot.error {{ background:#c25a12; }}
   .dot.skipped {{ background:#98a6b8; }}
@@ -313,11 +404,16 @@ def to_html(report: dict[str, Any]) -> str:
   <p class="meta">
     Analyse du {_e(report.get("started_at", ""))} · durée {int(report.get("duration_ms") or 0)} ms ·
     {len(findings)} constat(s) · identifiant {_e(report.get("scan_id", ""))}
+    {f"· {len(pages)} page(s) analysée(s)" if pages else ""}
+    · {verify_html}
   </p>
 
   <div class="cells">{summary_cells}</div>
 
   {f'<h2>À corriger en priorité</h2><div class="panel"><ol class="priority">{priority_html}</ol></div>' if priority_html else ""}
+
+  {diff_html}
+{pages_html}
 
   <h2>Constats ({len(findings)})</h2>
   {''.join(findings_html) if findings_html else '<div class="panel">Aucun problème détecté par les contrôles passifs.</div>'}

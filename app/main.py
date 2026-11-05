@@ -9,6 +9,7 @@ from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import (
@@ -20,7 +21,7 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import config, db, reporting
+from . import alerts, config, db, diffing, reporting, verify
 from .models import SEVERITY_LABELS_FR
 from .safety import ScanError, normalize_target
 from .scanner.engine import run_scan
@@ -42,6 +43,29 @@ app = FastAPI(
 )
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
+_OPEN_PATHS = {"/api/health"}
+
+
+@app.middleware("http")
+async def require_token(request: Request, call_next):
+    """Protège l'instance si VULNLENS_TOKEN est défini (déploiement partagé)."""
+    if not config.AUTH_TOKEN:
+        return await call_next(request)
+
+    path = request.url.path
+    if not path.startswith("/api") or path in _OPEN_PATHS:
+        return await call_next(request)
+
+    header = request.headers.get("authorization", "")
+    token = header[7:].strip() if header.lower().startswith("bearer ") else ""
+    token = token or request.headers.get("x-api-key", "").strip()
+    if token != config.AUTH_TOKEN:
+        return JSONResponse(
+            status_code=401,
+            content={"error": "Jeton d'API requis (en-tête Authorization: Bearer …)."},
+        )
+    return await call_next(request)
+
 _SEMAPHORE = asyncio.Semaphore(config.MAX_CONCURRENT_SCANS)
 _RATE_LIMIT: dict[str, deque[float]] = defaultdict(deque)
 _RATE_WINDOW = 300.0
@@ -54,7 +78,7 @@ class ScanRequest(BaseModel):
         False,
         description="Confirme que l'utilisateur est autorisé à tester cette cible.",
     )
-    profile: Literal["quick", "deep"] = Field(
+    profile: Literal["quick", "standard", "deep"] = Field(
         "quick",
         description="`quick` : contrôles passifs standards. `deep` : + AXFR, sous-domaines, redirections ouvertes.",
     )
@@ -108,9 +132,14 @@ async def meta() -> dict:
                 "detail": "En-têtes, TLS, cookies, CORS, 38 fichiers, contenu, DNS",
             },
             {
+                "key": "standard",
+                "label": "Standard",
+                "detail": "Jusqu'à 6 pages internes, en-têtes et contenu agrégés",
+            },
+            {
                 "key": "deep",
                 "label": "Approfondi",
-                "detail": "Tout + transfert de zone, sous-domaines, redirections ouvertes",
+                "detail": "Jusqu'à 12 pages + AXFR, sous-domaines, takeovers, redirections",
             },
         ],
         "severities": [
@@ -188,6 +217,16 @@ async def scan(payload: ScanRequest, request: Request) -> StreamingResponse:
                 report = await task
                 try:
                     await db.save_scan(report.to_dict(), profile=report.profile)
+                    host = _host_of(report.final_url or report.target)
+                    previous = await db.previous_scan(host, exclude_id=report.scan_id)
+                    asyncio.create_task(alerts.notify(report.to_dict(), previous))
+                    yield _event(
+                        {
+                            "type": "saved",
+                            "scan_id": report.scan_id,
+                            "verified": report.verified,
+                        }
+                    )
                 except Exception as exc:  # noqa: BLE001
                     yield _event(
                         {
@@ -226,6 +265,20 @@ async def scan(payload: ScanRequest, request: Request) -> StreamingResponse:
     )
 
 
+def _host_of(url: str) -> str:
+    return (urlsplit(url).hostname or "").lower()
+
+
+def _clean_host(raw: str) -> str:
+    try:
+        parsed = urlsplit(normalize_target(raw))
+    except ScanError as exc:
+        raise HTTPException(status_code=400, detail=exc.message) from exc
+    if not parsed.hostname:
+        raise HTTPException(status_code=400, detail="Nom d'hôte invalide.")
+    return parsed.hostname.lower()
+
+
 @app.get("/api/scans")
 async def api_scans(host: str | None = None, limit: int = 50) -> dict:
     """Historique des analyses enregistrées (les plus récentes d'abord)."""
@@ -236,6 +289,27 @@ async def api_scans(host: str | None = None, limit: int = 50) -> dict:
 async def api_stats() -> dict:
     """Indicateurs du tableau de bord : volume, score moyen, tendance, sévérités."""
     return await db.stats()
+
+
+@app.get("/api/scans/{scan_id}/diff")
+async def api_scan_diff(scan_id: str) -> dict:
+    """Écart avec l'analyse précédente du même hôte."""
+    report = await _report_or_404(scan_id)
+    host = _host_of(report.get("final_url") or report.get("target") or "")
+    previous = await db.previous_scan(host, exclude_id=scan_id) if host else None
+    return diffing.diff_reports(report, previous)
+
+
+@app.get("/api/verify/{host}")
+async def api_verify_status(host: str) -> dict:
+    """Jeton et instructions de vérification de propriété (sans requête réseau)."""
+    return await verify.status(_clean_host(host))
+
+
+@app.post("/api/verify/{host}/check")
+async def api_verify_check(host: str) -> dict:
+    """Vérifie la présence du TXT ou du fichier .well-known."""
+    return await verify.verify(_clean_host(host))
 
 
 @app.get("/api/scans/{scan_id}")
@@ -252,6 +326,15 @@ async def api_delete_scan(scan_id: str) -> dict:
     if not deleted:
         raise HTTPException(status_code=404, detail="Analyse introuvable.")
     return {"deleted": True, "scan_id": scan_id}
+
+
+async def _report_with_diff(scan_id: str) -> dict:
+    """Rapport + écart avec l'analyse précédente (utilisé par les exports)."""
+    report = await _report_or_404(scan_id)
+    host = _host_of(report.get("final_url") or report.get("target") or "")
+    previous = await db.previous_scan(host, exclude_id=scan_id) if host else None
+    report["diff"] = diffing.diff_reports(report, previous)
+    return report
 
 
 async def _report_or_404(scan_id: str) -> dict:
@@ -279,13 +362,13 @@ async def api_scan_sarif(scan_id: str) -> Response:
 
 @app.get("/api/scans/{scan_id}/report.html")
 async def api_scan_html(scan_id: str) -> Response:
-    report = await _report_or_404(scan_id)
+    report = await _report_with_diff(scan_id)
     return _download(reporting.to_html(report), "text/html; charset=utf-8", f"vulnlens-{scan_id}.html")
 
 
 @app.get("/api/scans/{scan_id}/markdown")
 async def api_scan_markdown(scan_id: str) -> Response:
-    report = await _report_or_404(scan_id)
+    report = await _report_with_diff(scan_id)
     return _download(
         reporting.to_markdown(report), "text/markdown; charset=utf-8", f"vulnlens-{scan_id}.md"
     )
@@ -293,7 +376,7 @@ async def api_scan_markdown(scan_id: str) -> Response:
 
 @app.get("/api/scans/{scan_id}/json")
 async def api_scan_json(scan_id: str) -> Response:
-    report = await _report_or_404(scan_id)
+    report = await _report_with_diff(scan_id)
     return _download(
         json.dumps(report, ensure_ascii=False, indent=2),
         "application/json",

@@ -24,6 +24,9 @@ INDEX_HTML = """<!doctype html>
     <button type="submit">Connexion</button>
   </form>
   <iframe src="https://video.test/embed"></iframe>
+  <a href="/about">À propos</a>
+  <a href="/contact">Contact</a>
+  <a href="/logout">Déconnexion</a>
   <a href="https://example.org" target="_blank">partenaire</a>
 </body>
 </html>
@@ -54,6 +57,18 @@ class BadSiteHandler(BaseHTTPRequestHandler):
 
         if path == "/":
             self._send(200, INDEX_HTML)
+        elif path == "/about":
+            self._send(200, "<html><head><title>À propos</title></head><body><a href='/'>retour</a></body></html>")
+        elif path == "/contact":
+            self._send(
+                200,
+                """<html><head><title>Contact</title></head><body>
+                <script src="http://cdn.example.test/form.js"></script>
+                <form action="http://test.local/send" method="post">
+                  <input type="text" name="email">
+                  <input type="password" name="secret">
+                </form></body></html>""",
+            )
         elif path == "/.git/HEAD":
             self._send(200, "ref: refs/heads/main\n", "text/plain")
         elif path == "/.env":

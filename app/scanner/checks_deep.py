@@ -29,6 +29,33 @@ SUBDOMAIN_WORDLIST = [
 ]
 
 REDIRECT_PARAMS = ["next", "url", "redirect", "return", "returnUrl", "dest", "continue"]
+
+# Services dont un sous-domaine mal détaché peut être réclamé par un tiers.
+# La détection reste factuelle : CNAME vers le service + page d'erreur caractéristique.
+TAKEOVER_SIGNATURES: dict[str, tuple[str, ...]] = {
+    "s3.amazonaws.com": ("NoSuchBucket", "The specified bucket does not exist"),
+    "github.io": ("There isn't a GitHub Pages site here",),
+    "herokuapp.com": ("No such app", "heroku | no such app"),
+    "azurewebsites.net": ("404 Web Site not found",),
+    "cloudfront.net": ("Bad request", "ERROR: The request could not be satisfied"),
+    "trafficmanager.net": ("404 Not Found",),
+    "myshopify.com": ("Sorry, this shop is currently unavailable",),
+    "zendesk.com": ("Help Center Closed",),
+    "ghost.io": ("Domain error",),
+    "surge.sh": ("project not found",),
+    "bitbucket.io": ("Repository not found",),
+    "readthedocs.io": ("unknown to Read the Docs",),
+    "freshdesk.com": ("There is no helpdesk here",),
+    "pantheonsite.io": ("The gods are wise, but do not know of the site",),
+    "tumblr.com": ("There's nothing here",),
+    "uservoice.com": ("This UserVoice subdomain is currently available",),
+    "intercom.help": ("This page is reserved for artistic purposes",),
+    "webflow.io": ("The page you are looking for doesn't exist",),
+    "netlify.app": ("Not Found - Request ID",),
+    "fly.dev": ("404 Not Found",),
+}
+
+MAX_TAKEOVER_CHECKS = 8
 PROBE_URL = "https://vulnlens.example/probe"
 MAX_SUBDOMAINS = 8
 
@@ -163,6 +190,71 @@ async def check_open_redirect(fetcher: Fetcher, base_url: str) -> list[Finding]:
 
 
 # ---------------------------------------------------------------------------
+# Fuite de sous-domaine (subdomain takeover)
+# ---------------------------------------------------------------------------
+
+
+def _cname(name: str) -> str | None:
+    import dns.resolver
+
+    try:
+        answers = dns.resolver.resolve(name, "CNAME", lifetime=4)
+    except Exception:  # noqa: BLE001
+        return None
+    for record in answers or []:
+        return str(record.target).rstrip(".").lower()
+    return None
+
+
+def _service_for(cname: str) -> str | None:
+    for suffix in TAKEOVER_SIGNATURES:
+        if cname == suffix or cname.endswith("." + suffix):
+            return suffix
+    return None
+
+
+async def check_takeovers(fetcher: Fetcher, subdomains: dict[str, list[str]]) -> list[Finding]:
+    """CNAME vers un service tiers + page d'erreur du service = sous-domaine réclamable."""
+    candidates: list[tuple[str, str]] = []
+    for name in list(subdomains)[:MAX_TAKEOVER_CHECKS]:
+        cname = await asyncio.to_thread(_cname, name)
+        if not cname:
+            continue
+        service = _service_for(cname)
+        if service:
+            candidates.append((name, service))
+
+    findings: list[Finding] = []
+    for name, service in candidates:
+        signatures = TAKEOVER_SIGNATURES[service]
+        for scheme in ("https", "http"):
+            response = await fetcher.get(f"{scheme}://{name}/", max_bytes=64_000, timeout=8)
+            if response.error or response.status >= 500:
+                continue
+            body = response.text[:60_000].lower()
+            matched = next((sig for sig in signatures if sig.lower() in body), None)
+            if matched:
+                findings.append(
+                    Finding(
+                        id=f"recon.subdomain-takeover.{name}",
+                        title="Sous-domaine potentiellement détachable",
+                        severity=Severity.HIGH,
+                        category=CATEGORY,
+                        description="Le sous-domaine pointe vers un service tiers qui ne reconnaît "
+                        "pas ce nom : un attaquant peut enregistrer la ressource correspondante et "
+                        "servir du contenu (hameçonnage, vol de cookies) sous votre domaine.",
+                        evidence=f"{name} → CNAME {service}\nHTTP {response.status} · signature : "
+                        f"{matched!r}",
+                        remediation="Supprimez l'enregistrement DNS orphelin, ou réclamez la "
+                        "ressource auprès du fournisseur. Inventoriez régulièrement vos CNAME.",
+                        reference="https://owasp.org/www-community/attacks/Subdomain_takeover",
+                    )
+                )
+                break
+    return findings
+
+
+# ---------------------------------------------------------------------------
 # Sous-domaines
 # ---------------------------------------------------------------------------
 
@@ -179,9 +271,10 @@ def _wildcard_name(host: str) -> str:
     return f"vulnlens-{suffix}.{host}"
 
 
-async def discover_subdomains(host: str, concurrency: int = 12) -> list[Finding]:
+async def find_subdomains(host: str, concurrency: int = 12) -> dict[str, list[str]]:
+    """Résolution DNS passive d'une liste de noms courants, wildcard exclu."""
     if _is_ip(host):
-        return []
+        return {}
 
     wildcard_addresses = set(await _resolve_async(_wildcard_name(host)))
     semaphore = asyncio.Semaphore(concurrency)
@@ -200,7 +293,10 @@ async def discover_subdomains(host: str, concurrency: int = 12) -> list[Finding]
         if wildcard_addresses and set(addresses) <= wildcard_addresses:
             continue
         found[f"{name}.{host}"] = addresses
+    return found
 
+
+def summarize_subdomains(host: str, found: dict[str, list[str]]) -> list[Finding]:
     if not found:
         return []
 
@@ -250,11 +346,16 @@ async def discover_subdomains(host: str, concurrency: int = 12) -> list[Finding]
 # ---------------------------------------------------------------------------
 
 
+async def discover_subdomains(host: str, concurrency: int = 12) -> list[Finding]:
+    """Compatibilité : renvoie directement les constats de reconnaissance."""
+    return summarize_subdomains(host, await find_subdomains(host, concurrency))
+
+
 async def run_deep(fetcher: Fetcher, host: str, base_url: str) -> list[Finding]:
     findings: list[Finding] = []
 
     zone_task = asyncio.create_task(check_zone_transfer(host))
-    subs_task = asyncio.create_task(discover_subdomains(host))
+    subs_task = asyncio.create_task(find_subdomains(host))
     redirects = await check_open_redirect(fetcher, base_url)
     findings.extend(redirects)
 
@@ -263,8 +364,16 @@ async def run_deep(fetcher: Fetcher, host: str, base_url: str) -> list[Finding]:
         findings.append(zone_finding)
 
     try:
-        findings.extend(await asyncio.wait_for(subs_task, timeout=25))
+        subdomains = await asyncio.wait_for(subs_task, timeout=25)
     except (TimeoutError, Exception):  # noqa: BLE001
+        subdomains = {}
         subs_task.cancel()
+
+    findings.extend(summarize_subdomains(host, subdomains))
+    if subdomains:
+        try:
+            findings.extend(await asyncio.wait_for(check_takeovers(fetcher, subdomains), timeout=30))
+        except (TimeoutError, Exception):  # noqa: BLE001
+            pass
 
     return findings

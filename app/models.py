@@ -96,6 +96,8 @@ class ScanReport:
     errors: list[str] = field(default_factory=list)
     scan_id: str = ""
     profile: str = "quick"
+    verified: bool = False
+    pages: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -113,5 +115,7 @@ class ScanReport:
             "priorities": self.priorities,
             "scan_id": self.scan_id,
             "profile": self.profile,
+            "verified": self.verified,
+            "pages": self.pages,
             "errors": self.errors,
         }

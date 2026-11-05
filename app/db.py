@@ -30,10 +30,20 @@ CREATE TABLE IF NOT EXISTS scans (
     duration_ms    INTEGER NOT NULL DEFAULT 0,
     findings_count INTEGER NOT NULL DEFAULT 0,
     counts         TEXT NOT NULL DEFAULT '{}',
+    verified       INTEGER NOT NULL DEFAULT 0,
+    pages_count    INTEGER NOT NULL DEFAULT 0,
     report         TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_scans_host_date ON scans(host, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_scans_date ON scans(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS verifications (
+    host          TEXT PRIMARY KEY,
+    token         TEXT NOT NULL,
+    method        TEXT,
+    created_at    TEXT NOT NULL,
+    verified_at   TEXT
+);
 """
 
 
@@ -51,8 +61,22 @@ def _connect() -> sqlite3.Connection:
     key = str(DB_PATH)
     if key not in _INITIALIZED:
         conn.executescript(SCHEMA)
+        _migrate(conn)
         _INITIALIZED.add(key)
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Migration douce : ajoute les colonnes manquantes aux bases existantes."""
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(scans)")}
+    additions = {
+        "verified": "ALTER TABLE scans ADD COLUMN verified INTEGER NOT NULL DEFAULT 0",
+        "pages_count": "ALTER TABLE scans ADD COLUMN pages_count INTEGER NOT NULL DEFAULT 0",
+        "profile": "ALTER TABLE scans ADD COLUMN profile TEXT NOT NULL DEFAULT 'quick'",
+    }
+    for column, statement in additions.items():
+        if column not in columns:
+            conn.execute(statement)
 
 
 def _init_sync() -> None:
@@ -84,6 +108,8 @@ def _row_to_summary(row: sqlite3.Row) -> dict[str, Any]:
         "grade": row["grade"],
         "duration_ms": row["duration_ms"],
         "findings_count": row["findings_count"],
+        "verified": bool(row["verified"]) if "verified" in row.keys() else False,
+        "pages_count": int(row["pages_count"]) if "pages_count" in row.keys() else 0,
         "counts": json.loads(row["counts"] or "{}"),
     }
 
@@ -98,8 +124,8 @@ def _save_sync(report: dict[str, Any], profile: str) -> str:
             """
             INSERT OR REPLACE INTO scans
                 (id, host, target, final_url, created_at, profile, score, grade,
-                 duration_ms, findings_count, counts, report)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 duration_ms, findings_count, counts, verified, pages_count, report)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 scan_id,
@@ -113,6 +139,8 @@ def _save_sync(report: dict[str, Any], profile: str) -> str:
                 int(report.get("duration_ms") or 0),
                 int(sum(counts.values())) if counts else 0,
                 json.dumps(counts, ensure_ascii=False),
+                1 if report.get("verified") else 0,
+                len(report.get("pages") or []),
                 payload,
             ),
         )
@@ -230,3 +258,63 @@ def _previous_sync(host: str, exclude_id: str) -> dict[str, Any] | None:
 
 async def previous_scan(host: str, exclude_id: str) -> dict[str, Any] | None:
     return await asyncio.to_thread(_previous_sync, host, exclude_id)
+
+
+# ---------------------------------------------------------------------------
+# Preuve de propriété d'un domaine
+# ---------------------------------------------------------------------------
+
+
+def _ensure_token_sync(host: str) -> dict[str, Any]:
+    import secrets
+
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM verifications WHERE host = ?", (host.lower(),)).fetchone()
+        if row is None:
+            conn.execute(
+                "INSERT INTO verifications (host, token, created_at) VALUES (?, ?, ?)",
+                (host.lower(), secrets.token_hex(16), datetime.now(UTC).isoformat(timespec="seconds")),
+            )
+            row = conn.execute(
+                "SELECT * FROM verifications WHERE host = ?", (host.lower(),)
+            ).fetchone()
+    return dict(row)
+
+
+async def ensure_token(host: str) -> dict[str, Any]:
+    """Retourne (et crée au besoin) le jeton de vérification d'un domaine."""
+    return await asyncio.to_thread(_ensure_token_sync, host)
+
+
+def _mark_verified_sync(host: str, method: str) -> dict[str, Any]:
+    now = datetime.now(UTC).isoformat(timespec="seconds")
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE verifications SET verified_at = ?, method = ? WHERE host = ?",
+            (now, method, host.lower()),
+        )
+        row = conn.execute("SELECT * FROM verifications WHERE host = ?", (host.lower(),)).fetchone()
+    return dict(row)
+
+
+async def mark_verified(host: str, method: str) -> dict[str, Any]:
+    return await asyncio.to_thread(_mark_verified_sync, host, method)
+
+
+def _verification_sync(host: str) -> dict[str, Any] | None:
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM verifications WHERE host = ?", (host.lower(),)).fetchone()
+    return dict(row) if row else None
+
+
+async def verification(host: str) -> dict[str, Any] | None:
+    return await asyncio.to_thread(_verification_sync, host)
+
+
+def _is_verified_sync(host: str) -> bool:
+    row = _verification_sync(host)
+    return bool(row and row.get("verified_at"))
+
+
+async def is_verified(host: str) -> bool:
+    return await asyncio.to_thread(_is_verified_sync, host)
