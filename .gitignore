@@ -1,8 +1,34 @@
+# Environnements virtuels
+.venv/
+venv/
+env/
+
+# Python
 __pycache__/
-*.pyc
-out/
-.DS_Store
-.ipynb_checkpoints/
+*.py[cod]
+*.egg-info/
 .pytest_cache/
-exports/
-out
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Secrets & config locale
+.env
+.env.*
+*.local
+
+# Divers
+.DS_Store
+*.log
+dist/
+build/
+
+# Base de données locale (historique des analyses)
+data/
+*.db
+*.db-shm
+*.db-wal
+
+node_modules/
+package-lock.json

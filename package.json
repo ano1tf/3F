@@ -1,0 +1,15 @@
+{
+  "name": "vulnlens-ui-tools",
+  "private": true,
+  "version": "5.0.0",
+  "description": "Outils front de VulnLens (test de fumée de l'interface)",
+  "type": "module",
+  "scripts": {
+    "ui:smoke": "node tools/ui-smoke.mjs",
+    "ui:trend": "node tools/ui-trend-smoke.mjs",
+    "ui:check": "npm run ui:smoke && npm run ui:trend"
+  },
+  "devDependencies": {
+    "jsdom": "^31.0.0"
+  }
+}

@@ -1,0 +1,519 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VulnLens — scanner de vulnérabilités web</title>
+  <meta name="description" content="Analysez la surface d'attaque d'un site web en un clic : HTTPS, TLS, en-têtes, cookies, CORS, fichiers exposés, DNS. Pour des tests autorisés uniquement." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 2l11 4v9c0 7-4.7 12.6-11 15C9.7 27.6 5 22 5 15V6z' fill='%230b1220'/%3E%3Cpath d='M16 5l8 3v7c0 5.2-3.4 9.4-8 11.4C11.4 24.4 8 20.2 8 15V8z' fill='none' stroke='%2322d3ee' stroke-width='1.6'/%3E%3Ccircle cx='16' cy='14' r='3.4' fill='none' stroke='%23a78bfa' stroke-width='1.6'/%3E%3Cpath d='M18.6 16.6L22 20' stroke='%23a78bfa' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="bg-grid" aria-hidden="true"></div>
+  <div class="bg-glow" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <a class="brand" href="/">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" width="26" height="26">
+          <path d="M16 3l10 3.6v8.6c0 6.5-4.3 11.7-10 13.8-5.7-2.1-10-7.3-10-13.8V6.6z" fill="none" stroke="url(#g1)" stroke-width="1.8"/>
+          <circle cx="15.2" cy="14" r="3.6" fill="none" stroke="url(#g1)" stroke-width="1.8"/>
+          <path d="M18 16.8l3.6 3.6" stroke="url(#g1)" stroke-width="1.8" stroke-linecap="round"/>
+          <defs><linearGradient id="g1" x1="0" y1="0" x2="32" y2="32">
+            <stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#a78bfa"/>
+          </linearGradient></defs>
+        </svg>
+      </span>
+      <span class="brand-name">VulnLens</span>
+      <span class="brand-tag">v6.0</span>
+    </a>
+    <nav class="topnav">
+      <button class="nav-btn" id="nav-analyzer" type="button" aria-pressed="true">Analyser</button>
+      <button class="nav-btn" id="nav-dashboard" type="button" aria-pressed="false">Tableau de bord</button>
+      <button class="nav-btn" id="nav-watch" type="button" aria-pressed="false">Surveillance</button>
+      <a href="#methode">Méthode</a>
+      <a href="/docs" target="_blank" rel="noopener">API</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="hero-badge">
+        <span class="dot"></span> Scanner passif · tests autorisés uniquement
+      </div>
+      <h1>La surface d'attaque de votre site,<br /><span class="grad">en un clic.</span></h1>
+      <p class="hero-sub">
+        Transport, TLS, en-têtes, secrets, dépendances tierces, e-mail et sous-domaines :
+        un rapport priorisé, une synthèse lisible par votre direction et un plan d'action
+        chiffré en quelques secondes.
+      </p>
+      <div class="hero-chips" aria-label="Capacités clés">
+        <span>Synthèse exécutive</span>
+        <span>Chasse aux secrets</span>
+        <span>Certificate Transparency</span>
+        <span>Surveillance planifiée</span>
+        <span>100 % passif</span>
+      </div>
+
+      <form id="scan-form" class="scan-form" autocomplete="off" novalidate>
+        <label class="sr-only" for="target">Adresse du site à analyser</label>
+        <div class="input-shell">
+          <svg class="input-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/>
+            <path d="M3 12h18M12 3c2.6 2.6 2.6 15.4 0 18M12 3c-2.6 2.6-2.6 15.4 0 18" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".7"/>
+          </svg>
+          <input id="target" name="target" type="text" inputmode="url" spellcheck="false"
+                 placeholder="exemple.fr" aria-describedby="target-hint" required />
+          <button type="submit" id="scan-btn" class="btn-primary">
+            <span class="btn-label">Analyser</span>
+            <svg class="btn-arrow" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+              <path d="M5 12h13M12.5 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </div>
+        <fieldset class="profiles" id="profile-select">
+          <legend class="sr-only">Profil d'analyse</legend>
+          <label class="profile-option">
+            <input type="radio" name="profile" value="quick" checked />
+            <span class="profile-box">
+              <span class="profile-name">Rapide</span>
+              <span class="profile-detail">En-têtes, TLS, cookies, 38 fichiers, DNS</span>
+            </span>
+          </label>
+          <label class="profile-option">
+            <input type="radio" name="profile" value="standard" />
+            <span class="profile-box">
+              <span class="profile-name">Standard</span>
+              <span class="profile-detail">Jusqu'à 6 pages, en-têtes et contenu agrégés</span>
+            </span>
+          </label>
+          <label class="profile-option">
+            <input type="radio" name="profile" value="deep" />
+            <span class="profile-box">
+              <span class="profile-name">Approfondi</span>
+              <span class="profile-detail">12 pages + AXFR, sous-domaines, takeovers, redirections</span>
+            </span>
+          </label>
+        </fieldset>
+
+        <p id="target-hint" class="hint">
+          Domaine ou URL complète. L'outil refuse les adresses internes (localhost, 10.x, 192.168.x).
+        </p>
+        <label class="consent">
+          <input type="checkbox" id="authorized" />
+          <span>
+            Je confirme être <strong>propriétaire</strong> du site ou disposer d'une
+            <strong>autorisation écrite</strong> pour le tester.
+          </span>
+        </label>
+      </form>
+    </section>
+
+    <!-- Progression -->
+    <section id="progress-panel" class="panel progress-panel" hidden aria-live="polite">
+      <div class="panel-head">
+        <h2>Analyse en cours</h2>
+        <span class="mono" id="progress-target"></span>
+      </div>
+      <div class="progress-track"><div class="progress-bar" id="progress-bar"></div></div>
+      <ol class="steps" id="steps"></ol>
+      <pre class="log mono" id="log"></pre>
+    </section>
+
+    <!-- Erreur -->
+    <section id="error-panel" class="panel error-panel" hidden role="alert">
+      <div class="panel-head">
+        <h2>Analyse impossible</h2>
+      </div>
+      <p id="error-message"></p>
+      <p class="muted">Corrige l'adresse ou réessaie dans un instant.</p>
+    </section>
+
+    <!-- Résultats -->
+    <section id="results" hidden>
+      <article class="panel summary-panel">
+        <div class="summary-left">
+          <div class="gauge" id="gauge">
+            <svg viewBox="0 0 120 120" width="132" height="132" aria-hidden="true">
+              <circle cx="60" cy="60" r="52" class="gauge-track"/>
+              <circle cx="60" cy="60" r="52" class="gauge-fill" id="gauge-fill"/>
+            </svg>
+            <div class="gauge-center">
+              <span class="gauge-score" id="score" aria-live="polite">–</span>
+              <span class="gauge-grade" id="grade">–</span>
+            </div>
+          </div>
+          <div class="summary-meta">
+            <div class="summary-title-row">
+              <h2 id="summary-title">Rapport d'analyse</h2>
+              <span class="risk-pill" id="summary-risk" hidden></span>
+            </div>
+            <p class="mono target-url" id="result-target"></p>
+            <p class="muted" id="result-meta"></p>
+            <p class="comparison" id="comparison" hidden></p>
+            <p class="verify-line">
+              <span class="verified-badge" id="verify-badge" hidden>✓ Domaine vérifié</span>
+              <button class="btn-ghost btn-mini" id="verify-open" type="button">Vérifier la propriété</button>
+            </p>
+          </div>
+        </div>
+        <div class="summary-right">
+          <div class="severity-grid" id="severity-grid"></div>
+          <div class="sev-ribbon" id="sev-ribbon" role="img" aria-label="Répartition des constats par sévérité"></div>
+          <div class="actions">
+            <button class="btn-ghost" id="export-json" type="button">JSON</button>
+            <button class="btn-ghost" id="export-html" type="button">Rapport HTML</button>
+            <button class="btn-ghost" id="export-sarif" type="button">SARIF</button>
+            <button class="btn-ghost" id="copy-md" type="button">Copier le rapport</button>
+            <button class="btn-ghost" id="print-report" type="button">Imprimer / PDF</button>
+            <button class="btn-ghost" id="new-scan" type="button">Nouvelle analyse</button>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel exec-panel" id="exec-panel" hidden>
+        <div class="exec-top">
+          <span class="exec-kicker">Synthèse exécutive</span>
+          <button class="btn-ghost btn-mini" id="copy-exec" type="button">Copier la synthèse</button>
+        </div>
+        <div class="exec-grid">
+          <div class="exec-copy">
+            <span class="risk-pill" id="exec-risk">—</span>
+            <p class="exec-headline" id="exec-headline" aria-live="polite"></p>
+            <p class="exec-paragraph" id="exec-paragraph"></p>
+            <div class="exec-lists">
+              <div>
+                <h3>Ce qui expose le plus</h3>
+                <ul class="exec-risks" id="exec-risks"></ul>
+              </div>
+              <div>
+                <h3>Ce qui tient déjà</h3>
+                <ul class="exec-strengths" id="exec-strengths"></ul>
+              </div>
+            </div>
+          </div>
+          <div class="exec-radar">
+            <div id="radar"></div>
+            <p class="muted small">Exposition relative par catégorie</p>
+          </div>
+        </div>
+      </article>
+
+      <div class="tabs" id="result-tabs" role="tablist" aria-label="Sections du rapport">
+        <button class="tab is-active" role="tab" data-tab="synthese" aria-selected="true">
+          Synthèse <span class="tab-count" id="tab-count-synthese"></span>
+        </button>
+        <button class="tab" role="tab" data-tab="situation" aria-selected="false">
+          Situation <span class="tab-count" id="tab-count-situation"></span>
+        </button>
+        <button class="tab" role="tab" data-tab="constats" aria-selected="false">
+          Constats <span class="tab-count" id="tab-count-constats"></span>
+        </button>
+        <button class="tab" role="tab" data-tab="technique" aria-selected="false">
+          Technique <span class="tab-count" id="tab-count-technique"></span>
+        </button>
+      </div>
+
+      <article class="panel" id="situation-panel" data-tab="situation" hidden>
+        <div class="panel-head">
+          <h2>Rapport de situation</h2>
+          <span class="muted small">les failles les plus dangereuses, cotées de 1 à 10</span>
+        </div>
+        <p class="muted small">
+          Pour chaque faille : comment on y arrive, ce qu'elle révèle, et à quel point elle est
+          dangereuse. Aucune charge exploitable n'est fournie — le but est de décider quoi corriger.
+        </p>
+        <div class="situation-grid" id="situation-list"></div>
+      </article>
+
+      <article class="panel priorities" id="priority-panel" data-tab="synthese" hidden>
+        <div class="panel-head">
+          <h2>À corriger en priorité</h2>
+          <span class="muted small">les trois constats qui comptent le plus</span>
+        </div>
+        <ol class="priority-list" id="priority-list"></ol>
+      </article>
+
+      <div class="tab-group" data-tab="constats">
+      <div class="results-toolbar">
+        <div class="filters" id="filters" role="group" aria-label="Filtrer par sévérité"></div>
+        <label class="search">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.7"/>
+            <path d="M16 16l4.5 4.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+          </svg>
+          <input type="search" id="findings-search" placeholder="Filtrer par mot-clé…" />
+        </label>
+      </div>
+
+      <div id="findings" class="findings"></div>
+      <p id="no-findings" class="panel empty-findings" hidden>
+        Aucun constat pour ce filtre. 🌤️
+      </p>
+      </div>
+
+      <article class="panel" id="plan-panel" data-tab="synthese" hidden>
+        <div class="panel-head">
+          <h2>Plan d'action</h2>
+          <span class="muted small" id="plan-caption"></span>
+        </div>
+        <div class="plan-cols" id="plan-cols"></div>
+      </article>
+
+      <article class="panel" id="diff-panel" data-tab="synthese" hidden>
+        <div class="panel-head">
+          <h2>Évolution depuis la dernière analyse</h2>
+          <span class="muted small" id="diff-caption"></span>
+        </div>
+        <div class="diff-cols">
+          <div class="diff-col">
+            <h3><span class="diff-dot new"></span> Nouveaux constats</h3>
+            <ul id="diff-new"></ul>
+          </div>
+          <div class="diff-col">
+            <h3><span class="diff-dot fixed"></span> Constats corrigés</h3>
+            <ul id="diff-fixed"></ul>
+          </div>
+        </div>
+        <p class="muted small" id="diff-persistent"></p>
+      </article>
+
+      <article class="panel" id="breakdown-panel" data-tab="synthese">
+        <div class="panel-head">
+          <h2>Composition du score</h2>
+          <span class="muted small" id="breakdown-total"></span>
+        </div>
+        <ul class="breakdown" id="breakdown"></ul>
+      </article>
+
+      <div class="two-col" data-tab="technique">
+        <article class="panel">
+          <div class="panel-head"><h2>Empreinte technique</h2></div>
+          <dl class="fingerprint" id="fingerprint"></dl>
+        </article>
+        <article class="panel">
+          <div class="panel-head"><h2>Contrôles exécutés</h2></div>
+          <ul class="checks" id="checks"></ul>
+        </article>
+      </div>
+
+      <article class="panel" id="pages-panel" data-tab="technique" hidden>
+        <div class="panel-head">
+          <h2>Pages analysées</h2>
+          <span class="muted small" id="pages-count"></span>
+        </div>
+        <ul class="pages" id="pages-list"></ul>
+      </article>
+
+      <article class="panel" id="third-panel" data-tab="technique" hidden>
+        <div class="panel-head">
+          <h2>Dépendances tierces</h2>
+          <span class="muted small" id="third-count"></span>
+        </div>
+        <p class="muted small">
+          Chaque domaine listé voit l'adresse IP de vos visiteurs. Une compromission chez l'un
+          d'eux devient une compromission de votre site.
+        </p>
+        <ul class="third" id="third-list"></ul>
+      </article>
+
+      <article class="panel" id="history-panel" data-tab="technique" hidden>
+        <div class="panel-head">
+          <h2>Historique local</h2>
+          <button class="btn-ghost" id="clear-history" type="button">Effacer</button>
+        </div>
+        <ul class="history" id="history"></ul>
+        <p class="muted small">
+          Stocké uniquement dans ce navigateur (aucun envoi au serveur). Clique sur une analyse
+          pour rouvrir son rapport.
+        </p>
+      </article>
+    </section>
+
+    <!-- Tableau de bord -->
+    <section id="dashboard" hidden>
+      <div class="dash-head">
+        <div>
+          <h2 class="dash-title">Tableau de bord</h2>
+          <p class="muted" id="dash-subtitle">Historique des analyses enregistrées sur cet instance.</p>
+        </div>
+        <div class="actions">
+          <button class="btn-ghost" id="dash-refresh" type="button">Rafraîchir</button>
+          <button class="btn-primary" id="dash-new" type="button">
+            <span class="btn-label">Nouvelle analyse</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="kpis" id="kpis"></div>
+
+      <article class="panel" id="watch-panel">
+        <div class="panel-head">
+          <h2>Surveillance planifiée</h2>
+          <span class="muted small" id="watch-status"></span>
+        </div>
+        <p class="muted small">
+          Une réanalyse périodique détecte les régressions (en-tête supprimé, fichier qui réapparaît,
+          secret publié par erreur) et déclenche l'alerte webhook configurée.
+        </p>
+        <form class="watch-form" id="watch-form" autocomplete="off">
+          <input id="watch-host" name="host" placeholder="exemple.fr" spellcheck="false" required />
+          <select id="watch-profile" aria-label="Profil de surveillance">
+            <option value="quick">Rapide</option>
+            <option value="standard" selected>Standard</option>
+            <option value="deep">Approfondi</option>
+          </select>
+          <select id="watch-interval" aria-label="Fréquence">
+            <option value="6">Toutes les 6 h</option>
+            <option value="24" selected>Chaque jour</option>
+            <option value="168">Chaque semaine</option>
+          </select>
+          <button class="btn-primary" type="submit"><span class="btn-label">Surveiller</span></button>
+        </form>
+        <ul class="watch-list" id="watch-list"></ul>
+        <p class="muted small" id="watch-empty" hidden>
+          Aucune cible surveillée. Ajoute un domaine pour lancer un suivi automatique.
+        </p>
+      </article>
+
+      <article class="panel" id="trend-panel" hidden>
+        <div class="panel-head">
+          <h2>Tendance</h2>
+          <select id="trend-host" class="ghost-select" aria-label="Choisir la cible"></select>
+        </div>
+        <div class="trend" id="trend"></div>
+      </article>
+
+      <article class="panel chart-panel" id="chart-panel" hidden>
+        <div class="panel-head">
+          <h2>Évolution du score</h2>
+          <span class="muted small" id="chart-caption"></span>
+        </div>
+        <div class="chart" id="chart"></div>
+      </article>
+
+      <article class="panel" id="scans-panel">
+        <div class="panel-head">
+          <h2>Analyses enregistrées</h2>
+          <span class="muted small" id="scans-count"></span>
+        </div>
+        <div class="table-wrap">
+          <table class="scans-table">
+            <thead>
+              <tr>
+                <th scope="col">Cible</th>
+                <th scope="col">Date</th>
+                <th scope="col">Profil</th>
+                <th scope="col">Score</th>
+                <th scope="col">Constats</th>
+                <th scope="col"><span class="sr-only">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody id="scans-body"></tbody>
+          </table>
+        </div>
+        <p id="dash-empty" class="muted" hidden>
+          Aucune analyse enregistrée pour l'instant. Lance une analyse pour démarrer l'historique.
+        </p>
+      </article>
+    </section>
+
+    <!-- Méthode / état vide -->
+    <section id="method" class="method">
+      <div class="method-grid">
+        <article class="panel">
+          <div class="panel-head"><h2 id="methode">Ce que l'outil vérifie</h2></div>
+          <ul class="scope-list" id="scope-list"></ul>
+        </article>
+        <article class="panel">
+          <div class="panel-head"><h2 id="limites">Ce que l'outil ne fait pas</h2></div>
+          <ul class="scope-list limits" id="limits-list"></ul>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
+
+  <footer class="footer">
+    <p>
+      <strong>VulnLens</strong> — scanner passif. Aucune exploitation, aucun test destructif.
+      N'analysez que des systèmes pour lesquels vous avez une autorisation.
+    </p>
+    <p class="muted">
+      Références : OWASP WSTG · RFC 9116 · RFC 7208 (SPF) · RFC 7489 (DMARC) · RFC 8659 (CAA)
+    </p>
+  </footer>
+
+  <template id="finding-template">
+    <article class="finding">
+      <button class="finding-head" type="button" aria-expanded="false">
+        <span class="sev-dot" aria-hidden="true"></span>
+        <span class="finding-titles">
+          <span class="finding-title"></span>
+          <span class="finding-cat"></span>
+        </span>
+        <span class="confidence" hidden></span>
+        <span class="danger-chip" hidden></span>
+        <span class="sev-badge"></span>
+        <svg class="chev" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+          <path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+      <div class="finding-body">
+        <p class="finding-desc"></p>
+        <div class="block">
+          <h3>Comment y arriver</h3>
+          <ol class="access"></ol>
+        </div>
+        <div class="block">
+          <h3>Ce que ça révèle</h3>
+          <p class="reveals"></p>
+        </div>
+        <div class="block">
+          <h3>Preuve</h3>
+          <pre class="evidence mono"></pre>
+        </div>
+        <div class="block remediation">
+          <h3>Remédiation</h3>
+          <p class="finding-fix"></p>
+        </div>
+        <div class="finding-footer">
+          <a class="reference" target="_blank" rel="noopener noreferrer">Documentation ↗</a>
+          <button class="btn-ghost btn-mini copy-finding" type="button">Copier ce constat</button>
+        </div>
+      </div>
+    </article>
+  </template>
+
+  <dialog id="verify-dialog" class="verify-dialog">
+    <form method="dialog" class="dialog-head">
+      <h2>Prouver la propriété du domaine</h2>
+      <button class="dialog-x" value="close" aria-label="Fermer">✕</button>
+    </form>
+    <p class="muted small">
+      Publiez l'une de ces deux preuves, puis lancez la vérification. Le jeton n'est pas un secret :
+      il prouve seulement que vous contrôlez le domaine.
+    </p>
+    <div class="verify-option">
+      <h3>1. Enregistrement DNS (recommandé)</h3>
+      <pre class="mono" id="verify-dns"></pre>
+      <button class="btn-ghost btn-mini" id="copy-dns" type="button">Copier</button>
+    </div>
+    <div class="verify-option">
+      <h3>2. Fichier .well-known</h3>
+      <pre class="mono" id="verify-file"></pre>
+      <button class="btn-ghost btn-mini" id="copy-file" type="button">Copier</button>
+    </div>
+    <p id="verify-status" class="muted small"></p>
+    <div class="dialog-actions">
+      <button class="btn-primary" id="verify-now" type="button">
+        <span class="btn-label">Vérifier maintenant</span>
+      </button>
+      <button class="btn-ghost" id="verify-close" type="button">Fermer</button>
+    </div>
+  </dialog>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
