@@ -9,7 +9,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from urllib.parse import urlsplit, urlunsplit
 
-from .. import config, verify
+from .. import config, narrative, verify
 from ..models import CheckResult, Finding, ScanReport
 from ..safety import ScanError, validate_target
 from . import (
@@ -22,6 +22,7 @@ from . import (
     checks_secrets,
     checks_thirdparty,
     checks_tls,
+    tech,
 )
 from .aggregate import aggregate, coverage_note
 from .crawl import CrawlPage, crawl
@@ -366,10 +367,10 @@ async def run_scan(
             )
 
         await advance("secrets", 88, "Recherche de secrets dans les scripts publics")
+        scripts: list[str] = []
+        for page in pages:
+            scripts.extend(checks_content.parse_page(page.response.text).scripts)
         try:
-            scripts: list[str] = []
-            for page in pages:
-                scripts.extend(checks_content.parse_page(page.response.text).scripts)
             secret_findings, secret_meta = await checks_secrets.scan_scripts(
                 fetcher,
                 response.url,
@@ -395,6 +396,8 @@ async def run_scan(
         headers_map = {k.lower(): v for k, v in response.headers.items()}
         headers_map["__url__"] = response.url
         report.fingerprint.update(checks_exposure.detect_fingerprint(headers_map, response.text))
+        for key, value in tech.detect(headers_map, response.text, scripts).items():
+            report.fingerprint.setdefault(key, value)
         report.fingerprint["pages_analysees"] = str(len(pages))
         if not same_origin(target.url, response.url):
             report.fingerprint["redirige_vers"] = response.url
@@ -436,7 +439,10 @@ async def run_scan(
         report.priorities = [f.id for f in priorities(report.findings)]
         report.counts = count_by_severity(report.findings)
         report.checks = checks
+        for finding in report.findings:
+            finding.confidence = narrative.confidence_for(finding.id)
         report.duration_ms = int((time.perf_counter() - started) * 1000)
+        report.executive = narrative.build(report.to_dict())
 
     await emit({"type": "result", "percent": 100, "report": report.to_dict()})
     return report

@@ -193,3 +193,55 @@ def test_markdown_contains_action_plan():
     markdown = reporting.to_markdown(sample_report())
     assert "## Plan d'action" in markdown
     assert "Score actuel" in markdown
+
+
+def test_html_includes_executive_summary_and_radar():
+    report = sample_report()
+    report["executive"] = {
+        "risk_level": "élevé",
+        "headline": "Deux failles exploitables",
+        "paragraph": "Analyse de 3 pages.",
+        "key_risks": [
+            {
+                "id": "exposure.git",
+                "title": "Dépôt Git exposé",
+                "severity": "critical",
+                "severity_label": "Critique",
+                "impact": "Le code source fuit.",
+            }
+        ],
+        "strengths": ["SPF publié pour le domaine"],
+        "radar": [
+            {"label": "Exposition de fichiers", "value": 100},
+            {"label": "Configuration HTTP", "value": 40},
+        ],
+    }
+    html = reporting.to_html(report)
+    assert "Synthèse" in html
+    assert "Risque élevé" in html
+    assert "Le code source fuit." in html
+    assert "SPF publié pour le domaine" in html
+    assert "<polygon" in html
+
+
+def test_markdown_includes_executive_summary():
+    report = sample_report()
+    report["executive"] = {
+        "risk_level": "critique",
+        "headline": "Accès immédiat",
+        "paragraph": "Un dépôt Git est public.",
+        "key_risks": [
+            {
+                "id": "exposure.git",
+                "title": "Dépôt Git exposé",
+                "severity": "critical",
+                "severity_label": "Critique",
+                "impact": "Le code source fuit.",
+            }
+        ],
+        "strengths": ["HTTPS actif"],
+        "radar": [],
+    }
+    markdown = reporting.to_markdown(report)
+    assert "**Risque critique**" in markdown
+    assert "### Ce qui expose le plus" in markdown

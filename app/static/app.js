@@ -42,7 +42,7 @@
   let searchTerm = "";
   let history = [];
   let dashboardLoaded = false;
-  let dashboardData = { stats: null, scans: [] };
+  let dashboardData = { stats: null, scans: [], hosts: [] };
 
   const HISTORY_KEY = "vulnlens.history.v1";
   const HISTORY_MAX = 10;
@@ -76,6 +76,19 @@
   function humanDuration(ms) {
     if (ms < 1000) return `${ms} ms`;
     return `${(ms / 1000).toFixed(1).replace(".", ",")} s`;
+  }
+
+  function toast(message, kind = "info") {
+    const host = document.getElementById("toasts");
+    if (!host) return;
+    const node = el("div", "toast", message);
+    node.dataset.kind = kind;
+    host.appendChild(node);
+    setTimeout(() => {
+      node.style.transition = "opacity .25s ease";
+      node.style.opacity = "0";
+      setTimeout(() => node.remove(), 260);
+    }, 3600);
   }
 
   /* --------------------------- Appels API / méta -------------------------- */
@@ -183,6 +196,7 @@
     $("#progress-target").textContent = target;
 
     button.disabled = true;
+    button.classList.add("is-busy");
     button.querySelector(".btn-label").textContent = "Analyse…";
 
     try {
@@ -252,6 +266,7 @@
       showError(error.message || "Impossible de contacter le serveur d'analyse.");
     } finally {
       button.disabled = false;
+      button.classList.remove("is-busy");
       button.querySelector(".btn-label").textContent = "Analyser";
     }
   }
@@ -296,6 +311,8 @@
       `${total} constat${total > 1 ? "s" : ""} · ${humanDuration(report.duration_ms)} · ` +
       `${formatDate(report.started_at)}`;
 
+    renderSeverityRibbon(counts);
+
     // Compteurs par sévérité
     const grid = $("#severity-grid");
     grid.innerHTML = "";
@@ -307,9 +324,11 @@
       grid.appendChild(cell);
     });
 
+    renderExecutive(report);
     renderFilters(report.findings || []);
     renderFindings();
     renderPriorities(report);
+    switchTab("synthese");
     renderBreakdown(report);
     renderFingerprint(report.fingerprint || {});
     renderChecks(report.checks || []);
@@ -324,8 +343,52 @@
     renderThirdParties(report);
     $("#diff-panel").hidden = true;
     fetchPlan(report);
+    updateTabCounts(report);
 
     results.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function renderSeverityRibbon(counts) {
+    const ribbon = $("#sev-ribbon");
+    if (!ribbon) return;
+    ribbon.innerHTML = "";
+    const total = SEVERITY_ORDER.reduce((sum, key) => sum + (counts[key] || 0), 0);
+    ribbon.hidden = total === 0;
+    if (!total) return;
+    SEVERITY_ORDER.forEach((sev) => {
+      const count = counts[sev] || 0;
+      if (!count) return;
+      const segment = el("span");
+      segment.dataset.sev = sev;
+      segment.style.flexGrow = String(count);
+      segment.title = `${count} ${severityLabel(sev).toLowerCase()}`;
+      ribbon.appendChild(segment);
+    });
+  }
+
+  function executiveToText(report) {
+    const executive = (report && report.executive) || {};
+    const lines = [
+      `Synthèse VulnLens — ${(report && (report.final_url || report.target)) || ""}`,
+      `Risque ${executive.risk_level || "—"} · score ${report ? report.score : "—"}/100`,
+      "",
+      executive.headline || "",
+      "",
+      executive.paragraph || "",
+      "",
+    ];
+    if ((executive.key_risks || []).length) {
+      lines.push("Ce qui expose le plus :");
+      executive.key_risks.forEach((risk) => {
+        lines.push(`- [${risk.severity_label}] ${risk.title} — ${risk.impact}`);
+      });
+      lines.push("");
+    }
+    if ((executive.strengths || []).length) {
+      lines.push("Ce qui tient déjà :");
+      executive.strengths.forEach((item) => lines.push(`- ${item}`));
+    }
+    return lines.join("\n");
   }
 
   function renderFilters(findings) {
@@ -385,6 +448,13 @@
       $(".finding-title", node).textContent = finding.title;
       $(".finding-cat", node).textContent = finding.category;
       $(".sev-badge", node).textContent = finding.severity_label || severityLabel(finding.severity);
+      const confidence = $(".confidence", node);
+      if (finding.confidence && finding.confidence !== "certain") {
+        confidence.hidden = false;
+        confidence.dataset.level = finding.confidence;
+        confidence.textContent =
+          finding.confidence === "probable" ? "à vérifier" : "à confirmer";
+      }
       $(".finding-desc", node).textContent = finding.description;
       $(".evidence", node).textContent = finding.evidence || "—";
       $(".finding-fix", node).textContent =
@@ -736,6 +806,7 @@
 
     $("#nav-analyzer").setAttribute("aria-pressed", isDashboard ? "false" : "true");
     $("#nav-dashboard").setAttribute("aria-pressed", isDashboard ? "true" : "false");
+    $("#nav-watch").setAttribute("aria-pressed", "false");
 
     if (isDashboard) {
       results.hidden = true;
@@ -748,7 +819,21 @@
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  function renderDashboardSkeleton() {
+    const kpis = $("#kpis");
+    if (kpis && !kpis.children.length) {
+      kpis.innerHTML = "";
+      for (let index = 0; index < 5; index += 1) {
+        const card = el("div", "kpi is-loading");
+        card.appendChild(el("div", "kpi-label skeleton", "Chargement"));
+        card.appendChild(el("div", "kpi-value skeleton", "—"));
+        kpis.appendChild(card);
+      }
+    }
+  }
+
   async function refreshDashboard() {
+    renderDashboardSkeleton();
     if (dashboardLoaded) {
       renderDashboard();
       return;
@@ -762,7 +847,12 @@
       dashboardData.stats = await statsResponse.json();
       dashboardData.scans = (await scansResponse.json()).scans || [];
       dashboardLoaded = true;
+      dashboardData.hosts = ((dashboardData.stats || {}).hosts || []).map(
+        (item) => (typeof item === "string" ? item : item.host)
+      ).filter(Boolean);
       renderDashboard();
+      loadWatch();
+      loadTrend();
     } catch (error) {
       $("#kpis").innerHTML = "";
       $("#scans-body").innerHTML = "";
@@ -801,6 +891,11 @@
         label: "Constats élevés",
         value: String(severity.high || 0),
         hint: "durcissement à planifier",
+      },
+      {
+        label: "Cibles surveillées",
+        value: String(stats.watches_enabled || 0),
+        hint: stats.watches ? `${stats.watches} configurée(s)` : "aucune surveillance active",
       },
     ];
     cards.forEach((card) => {
@@ -1123,6 +1218,318 @@
     });
   }
 
+  /* -------------------------------- Onglets ------------------------------- */
+
+  const TABS = ["synthese", "constats", "technique"];
+
+  function switchTab(name) {
+    if (!TABS.includes(name)) return;
+    document.querySelectorAll(".tab").forEach((tab) => {
+      const active = tab.dataset.tab === name;
+      tab.classList.toggle("is-active", active);
+      tab.setAttribute("aria-selected", active ? "true" : "false");
+    });
+    document.querySelectorAll("[data-tab]").forEach((node) => {
+      if (node.classList.contains("tab") || !TABS.includes(node.dataset.tab)) return;
+      node.classList.toggle("is-hidden", node.dataset.tab !== name);
+    });
+  }
+
+  function updateTabCounts(report) {
+    const findings = (report.findings || []).length;
+    const technical = (report.checks || []).length + (report.pages || []).length;
+    $("#tab-count-constats").textContent = findings || "";
+    $("#tab-count-technique").textContent = technical || "";
+    $("#tab-count-synthese").textContent = (report.priorities || []).length || "";
+  }
+
+  /* --------------------------- Synthèse exécutive -------------------------- */
+
+  function radarSvg(axes, size = 240) {
+    if (!axes || !axes.length) return "";
+    const count = axes.length;
+    const center = size / 2;
+    const radius = center - 34;
+    let inner = "";
+    [0.25, 0.5, 0.75, 1].forEach((ratio) => {
+      inner += `<circle cx="${center}" cy="${center}" r="${(radius * ratio).toFixed(1)}" fill="none" stroke="rgba(139,157,186,.18)"/>`;
+    });
+    const points = [];
+    axes.forEach((axis, index) => {
+      const angle = (2 * Math.PI * index) / count - Math.PI / 2;
+      const ratio = Math.max(0.04, Math.min(1, (axis.value || 0) / 100));
+      points.push(
+        `${(center + radius * ratio * Math.cos(angle)).toFixed(1)},${(center + radius * ratio * Math.sin(angle)).toFixed(1)}`
+      );
+      const ex = center + radius * Math.cos(angle);
+      const ey = center + radius * Math.sin(angle);
+      inner += `<line x1="${center}" y1="${center}" x2="${ex.toFixed(1)}" y2="${ey.toFixed(1)}" stroke="rgba(139,157,186,.16)"/>`;
+      const lx = center + (radius + 16) * Math.cos(angle);
+      const ly = center + (radius + 16) * Math.sin(angle);
+      const anchor = Math.abs(Math.cos(angle)) < 0.3 ? "middle" : Math.cos(angle) > 0 ? "start" : "end";
+      inner += `<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="${anchor}" dominant-baseline="middle" font-size="9.5">${escapeHtml((axis.label || "").slice(0, 18))}</text>`;
+    });
+    return `<svg viewBox="0 0 ${size} ${size}" role="img" aria-label="Exposition relative par catégorie">${inner}<polygon points="${points.join(" ")}" fill="rgba(34,211,238,.14)" stroke="#22d3ee" stroke-width="1.8"/></svg>`;
+  }
+
+  function renderExecutive(report) {
+    const executive = report.executive;
+    const panel = $("#exec-panel");
+    if (!executive) {
+      panel.hidden = true;
+      return;
+    }
+    panel.hidden = false;
+
+    const pill = $("#exec-risk");
+    pill.textContent = `Risque ${executive.risk_level || "—"}`;
+    pill.dataset.risk = executive.risk_level || "";
+
+    const summaryRisk = $("#summary-risk");
+    if (summaryRisk) {
+      summaryRisk.hidden = false;
+      summaryRisk.textContent = `Risque ${executive.risk_level || "—"}`;
+      summaryRisk.dataset.risk = executive.risk_level || "";
+    }
+
+    $("#exec-headline").textContent = executive.headline || "";
+    $("#exec-paragraph").textContent = executive.paragraph || "";
+
+    const risks = $("#exec-risks");
+    risks.innerHTML = "";
+    (executive.key_risks || []).forEach((risk) => {
+      const li = el("li");
+      li.style.borderLeftColor =
+        { critical: "#ff3b5c", high: "#ff8a3d", medium: "#ffd166", low: "#4cc9f0", info: "#93a4bd" }[
+          risk.severity
+        ] || "var(--border-strong)";
+      const sev = el("span", "sev", risk.severity_label);
+      sev.dataset.sev = risk.severity;
+      li.appendChild(sev);
+      li.appendChild(el("strong", null, risk.title));
+      li.appendChild(el("em", null, risk.impact));
+      risks.appendChild(li);
+    });
+    if (!(executive.key_risks || []).length) {
+      risks.appendChild(el("li", null, "Aucun risque majeur détecté."));
+    }
+
+    const strengths = $("#exec-strengths");
+    strengths.innerHTML = "";
+    (executive.strengths || []).forEach((item) => strengths.appendChild(el("li", null, item)));
+    if (!(executive.strengths || []).length) {
+      strengths.appendChild(el("li", null, "Rien de solide à mettre en avant pour l'instant."));
+    }
+
+    $("#radar").innerHTML = radarSvg(executive.radar || []);
+  }
+
+  /* ----------------------------- Surveillance ----------------------------- */
+
+  async function loadWatch() {
+    const list = $("#watch-list");
+    const empty = $("#watch-empty");
+    if (!list.children.length) {
+      list.innerHTML = "";
+      const placeholder = el("li", "is-loading skeleton");
+      list.appendChild(placeholder);
+    }
+    try {
+      const response = await fetch("/api/watch");
+      if (!response.ok) throw new Error("API indisponible");
+      const data = await response.json();
+      $("#watch-status").textContent = data.scheduler
+        ? `Planificateur actif · vérification toutes les ${Math.round(data.tick_seconds / 60)} min`
+        : "Planificateur inactif (VULNLENS_WATCH=1 pour l'activer)";
+      list.innerHTML = "";
+      (data.items || []).forEach((item) => {
+        const li = el("li");
+        li.appendChild(el("span", "watch-host", item.host));
+        const state = el("span", `watch-state ${item.enabled ? "on" : "off"}`, item.enabled ? "suivi" : "en pause");
+        li.appendChild(state);
+        li.appendChild(el("span", "watch-meta", `${item.profile} · ${item.interval_hours} h`));
+        const scoreText = item.last_score === null || item.last_score === undefined ? "jamais analysé" : `score ${item.last_score}`;
+        li.appendChild(el("span", "watch-meta", scoreText));
+        const nextLabel = item.due
+          ? "échéance atteinte"
+          : item.next_run
+          ? `prochain : ${formatDate(item.next_run)}`
+          : "en pause";
+        li.appendChild(el("span", "watch-meta", nextLabel));
+
+        const actions = el("div", "watch-actions");
+        if (item.last_scan_id) {
+          const open = el("button", "btn-ghost btn-mini", "Voir");
+          open.type = "button";
+          open.addEventListener("click", () => openStoredScan(item.last_scan_id));
+          actions.appendChild(open);
+        }
+        const run = el("button", "btn-ghost btn-mini", "Analyser");
+        run.type = "button";
+        run.addEventListener("click", () => runWatch(item.host, run));
+        actions.appendChild(run);
+        const toggle = el("button", "btn-ghost btn-mini", item.enabled ? "Pause" : "Reprendre");
+        toggle.type = "button";
+        toggle.addEventListener("click", () => toggleWatch(item, !item.enabled));
+        actions.appendChild(toggle);
+        const remove = el("button", "btn-ghost btn-mini", "Retirer");
+        remove.type = "button";
+        remove.addEventListener("click", () => deleteWatch(item.host));
+        actions.appendChild(remove);
+        li.appendChild(actions);
+        list.appendChild(li);
+      });
+      empty.hidden = (data.items || []).length > 0;
+    } catch (error) {
+      list.innerHTML = "";
+      empty.hidden = false;
+      empty.textContent = `Surveillance indisponible : ${error.message}`;
+    }
+  }
+
+  async function addWatch(event) {
+    event.preventDefault();
+    const host = $("#watch-host").value.trim();
+    if (!host) return;
+    const payload = {
+      host,
+      profile: $("#watch-profile").value,
+      interval_hours: Number($("#watch-interval").value),
+    };
+    try {
+      const response = await fetch("/api/watch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || "Ajout impossible");
+      }
+      $("#watch-host").value = "";
+      toast(`${payload.host} ajouté à la surveillance`, "ok");
+      await loadWatch();
+    } catch (error) {
+      $("#watch-status").textContent = error.message;
+    }
+  }
+
+  async function toggleWatch(item, enabled) {
+    await fetch("/api/watch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        host: item.host,
+        profile: item.profile,
+        interval_hours: item.interval_hours,
+        enabled,
+      }),
+    });
+    loadWatch();
+  }
+
+  async function deleteWatch(host) {
+    const response = await fetch(`/api/watch/${encodeURIComponent(host)}`, { method: "DELETE" });
+    if (response.ok) toast(`${host} retiré de la surveillance`);
+    else toast("Retrait impossible", "ko");
+    loadWatch();
+  }
+
+  async function runWatch(host, button) {
+    button.disabled = true;
+    button.textContent = "Analyse…";
+    try {
+      const response = await fetch(`/api/watch/${encodeURIComponent(host)}/run`, { method: "POST" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Analyse impossible");
+      button.textContent = `Score ${data.score}`;
+      toast(`${host} : score ${data.score}/100${data.previous_score != null ? ` (avant ${data.previous_score})` : ""}`, data.score < 50 ? "ko" : "ok");
+      setTimeout(() => {
+        button.textContent = "Analyser";
+        button.disabled = false;
+      }, 2200);
+      loadWatch();
+    } catch (error) {
+      button.textContent = "Échec";
+      toast(`Analyse impossible : ${error.message}`, "ko");
+      setTimeout(() => {
+        button.textContent = "Analyser";
+        button.disabled = false;
+      }, 2200);
+    }
+  }
+
+  /* -------------------------------- Tendance ------------------------------ */
+
+  async function loadTrend(host) {
+    const panel = $("#trend-panel");
+    const container = $("#trend");
+    const select = $("#trend-host");
+    let target = host;
+    if (!target) {
+      const hosts = dashboardData.hosts || [];
+      target = hosts[0] || "";
+    }
+    if (!target) {
+      panel.hidden = true;
+      return;
+    }
+    try {
+      const response = await fetch(`/api/trend/${encodeURIComponent(target)}`);
+      if (!response.ok) {
+        panel.hidden = true;
+        return;
+      }
+      const data = await response.json();
+      const points = data.points || [];
+      if (points.length < 2) {
+        panel.hidden = true;
+        return;
+      }
+      panel.hidden = false;
+      select.innerHTML = "";
+      (dashboardData.hosts || [target]).forEach((option) => {
+        const node = el("option", null, option);
+        node.value = option;
+        if (option === target) node.selected = true;
+        select.appendChild(node);
+      });
+      container.innerHTML = sparkline(points);
+    } catch (_) {
+      panel.hidden = true;
+    }
+  }
+
+  function sparkline(points) {
+    const W = 720;
+    const H = 150;
+    const pad = 22;
+    const scores = points.map((point) => point.score);
+    const min = Math.min(...scores);
+    const max = Math.max(...scores);
+    const span = Math.max(12, max - min);
+    const x = (index) => pad + (index / Math.max(1, points.length - 1)) * (W - pad * 2);
+    const y = (score) => pad + (1 - (score - (max - span)) / span) * (H - pad * 2);
+    const path = points.map((point, index) => `${index ? "L" : "M"}${x(index).toFixed(1)},${y(point.score).toFixed(1)}`).join(" ");
+    const area = `${path} L${x(points.length - 1).toFixed(1)},${H - pad} L${pad},${H - pad} Z`;
+    const dots = points
+      .map(
+        (point, index) =>
+          `<circle cx="${x(index).toFixed(1)}" cy="${y(point.score).toFixed(1)}" r="3" fill="#0b1220" stroke="#22d3ee" stroke-width="1.6"><title>${point.score}/100 — ${formatDate(point.date)}</title></circle>`
+      )
+      .join("");
+    return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Évolution du score">
+      <defs><linearGradient id="trendFill" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="rgba(34,211,238,.35)"/><stop offset="1" stop-color="rgba(34,211,238,0)"/>
+      </linearGradient></defs>
+      <path d="${area}" fill="url(#trendFill)"/>
+      <path d="${path}" fill="none" stroke="#22d3ee" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+      ${dots}
+      <text x="${pad}" y="${H - 5}" font-size="10" fill="#8b9dba">${formatDate(points[0].date)}</text>
+      <text x="${W - pad}" y="${H - 5}" font-size="10" fill="#8b9dba" text-anchor="end">${formatDate(points[points.length - 1].date)}</text>
+    </svg>`;
+  }
+
   /* --------------------------- Pages analysées ---------------------------- */
 
   function renderPages(report) {
@@ -1308,6 +1715,10 @@
   $("#print-report").addEventListener("click", () => window.print());
   $("#nav-analyzer").addEventListener("click", () => showView("analyzer"));
   $("#nav-dashboard").addEventListener("click", () => showView("dashboard"));
+  $("#nav-watch").addEventListener("click", () => {
+    showView("dashboard");
+    setTimeout(() => $("#watch-panel").scrollIntoView({ behavior: "smooth", block: "center" }), 120);
+  });
   $("#dash-refresh").addEventListener("click", () => {
     dashboardLoaded = false;
     refreshDashboard();
@@ -1361,6 +1772,26 @@
       $("#findings-search").blur();
     }
   });
+
+  document.querySelectorAll(".tab").forEach((tab, index, all) => {
+    tab.addEventListener("click", () => switchTab(tab.dataset.tab));
+    tab.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+      const next = (index + (event.key === "ArrowRight" ? 1 : all.length - 1)) % all.length;
+      all[next].focus();
+      switchTab(all[next].dataset.tab);
+    });
+  });
+  $("#watch-form").addEventListener("submit", addWatch);
+  $("#copy-exec").addEventListener("click", async (event) => {
+    if (!currentReport) return;
+    await copyText(executiveToText(currentReport));
+    const button = event.currentTarget;
+    button.textContent = "Copié ✓";
+    toast("Synthèse copiée dans le presse-papiers", "ok");
+    setTimeout(() => (button.textContent = "Copier la synthèse"), 1600);
+  });
+  $("#trend-host").addEventListener("change", (event) => loadTrend(event.target.value));
 
   loadHistory();
   renderHistory();

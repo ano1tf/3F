@@ -44,6 +44,17 @@ CREATE TABLE IF NOT EXISTS verifications (
     created_at    TEXT NOT NULL,
     verified_at   TEXT
 );
+
+CREATE TABLE IF NOT EXISTS watchlist (
+    host           TEXT PRIMARY KEY,
+    profile        TEXT NOT NULL DEFAULT 'standard',
+    interval_hours INTEGER NOT NULL DEFAULT 24,
+    enabled        INTEGER NOT NULL DEFAULT 1,
+    created_at     TEXT NOT NULL,
+    last_run       TEXT,
+    last_scan_id   TEXT,
+    last_score     INTEGER
+);
 """
 
 
@@ -200,6 +211,9 @@ def _stats_sync(limit_series: int = 40) -> dict[str, Any]:
         rows = conn.execute(
             "SELECT * FROM scans ORDER BY created_at ASC, rowid ASC"
         ).fetchall()
+        watches = conn.execute(
+            "SELECT COUNT(*) AS total, SUM(enabled) AS actives FROM watchlist"
+        ).fetchone()
 
     severity = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
     hosts: dict[str, dict[str, Any]] = {}
@@ -228,6 +242,8 @@ def _stats_sync(limit_series: int = 40) -> dict[str, Any]:
     ]
 
     return {
+        "watches": int(watches["total"] or 0),
+        "watches_enabled": int(watches["actives"] or 0),
         "total_scans": int(totals["total"] or 0),
         "average_score": round(float(totals["avg"] or 0), 1),
         "hosts": sorted(hosts.values(), key=lambda item: item["last_at"] or "", reverse=True),
@@ -240,7 +256,7 @@ async def stats() -> dict[str, Any]:
     return await asyncio.to_thread(_stats_sync)
 
 
-def _previous_sync(host: str, exclude_id: str) -> dict[str, Any] | None:
+def _previous_sync(host: str, exclude_id: str = "") -> dict[str, Any] | None:
     with _connect() as conn:
         row = conn.execute(
             """
@@ -256,7 +272,7 @@ def _previous_sync(host: str, exclude_id: str) -> dict[str, Any] | None:
     return json.loads(row["report"])
 
 
-async def previous_scan(host: str, exclude_id: str) -> dict[str, Any] | None:
+async def previous_scan(host: str, exclude_id: str = "") -> dict[str, Any] | None:
     return await asyncio.to_thread(_previous_sync, host, exclude_id)
 
 
@@ -318,3 +334,81 @@ def _is_verified_sync(host: str) -> bool:
 
 async def is_verified(host: str) -> bool:
     return await asyncio.to_thread(_is_verified_sync, host)
+
+
+# --------------------------------------------------------------------------- #
+# Surveillance planifiée
+# --------------------------------------------------------------------------- #
+
+def _watch_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "host": row["host"],
+        "profile": row["profile"],
+        "interval_hours": row["interval_hours"],
+        "enabled": bool(row["enabled"]),
+        "created_at": row["created_at"],
+        "last_run": row["last_run"],
+        "last_scan_id": row["last_scan_id"],
+        "last_score": row["last_score"],
+    }
+
+
+def _list_watches_sync() -> list[dict[str, Any]]:
+    with _connect() as conn:
+        rows = conn.execute("SELECT * FROM watchlist ORDER BY host").fetchall()
+    return [_watch_row(row) for row in rows]
+
+
+async def list_watches() -> list[dict[str, Any]]:
+    return await asyncio.to_thread(_list_watches_sync)
+
+
+def _upsert_watch_sync(host: str, profile: str, interval_hours: int, enabled: bool) -> dict[str, Any]:
+    from datetime import UTC, datetime
+
+    now = datetime.now(UTC).isoformat(timespec="seconds")
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO watchlist (host, profile, interval_hours, enabled, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(host) DO UPDATE SET
+                profile = excluded.profile,
+                interval_hours = excluded.interval_hours,
+                enabled = excluded.enabled
+            """,
+            (host.lower(), profile, max(1, interval_hours), 1 if enabled else 0, now),
+        )
+        row = conn.execute("SELECT * FROM watchlist WHERE host = ?", (host.lower(),)).fetchone()
+    return _watch_row(row)
+
+
+async def upsert_watch(
+    host: str, profile: str = "standard", interval_hours: int = 24, enabled: bool = True
+) -> dict[str, Any]:
+    return await asyncio.to_thread(_upsert_watch_sync, host, profile, interval_hours, enabled)
+
+
+def _delete_watch_sync(host: str) -> bool:
+    with _connect() as conn:
+        cursor = conn.execute("DELETE FROM watchlist WHERE host = ?", (host.lower(),))
+    return cursor.rowcount > 0
+
+
+async def delete_watch(host: str) -> bool:
+    return await asyncio.to_thread(_delete_watch_sync, host)
+
+
+def _mark_watch_run_sync(host: str, scan_id: str, score: int) -> None:
+    from datetime import UTC, datetime
+
+    now = datetime.now(UTC).isoformat(timespec="seconds")
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE watchlist SET last_run = ?, last_scan_id = ?, last_score = ? WHERE host = ?",
+            (now, scan_id, score, host.lower()),
+        )
+
+
+async def mark_watch_run(host: str, scan_id: str, score: int) -> None:
+    await asyncio.to_thread(_mark_watch_run_sync, host, scan_id, score)

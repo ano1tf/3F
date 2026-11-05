@@ -44,6 +44,7 @@ class Finding:
     evidence: str = ""
     remediation: str = ""
     reference: str = ""
+    confidence: str = "certain"  # certain | probable | a-confirmer
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -56,6 +57,7 @@ class Finding:
             "evidence": self.evidence,
             "remediation": self.remediation,
             "reference": self.reference,
+            "confidence": self.confidence,
         }
 
 
@@ -99,6 +101,7 @@ class ScanReport:
     verified: bool = False
     pages: list[dict[str, Any]] = field(default_factory=list)
     third_parties: list[dict[str, Any]] = field(default_factory=list)
+    executive: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -119,5 +122,6 @@ class ScanReport:
             "verified": self.verified,
             "pages": self.pages,
             "third_parties": self.third_parties,
+            "executive": self.executive,
             "errors": self.errors,
         }

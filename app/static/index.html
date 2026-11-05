@@ -25,11 +25,12 @@
         </svg>
       </span>
       <span class="brand-name">VulnLens</span>
-      <span class="brand-tag">v4.0</span>
+      <span class="brand-tag">v5.0</span>
     </a>
     <nav class="topnav">
       <button class="nav-btn" id="nav-analyzer" type="button" aria-pressed="true">Analyser</button>
       <button class="nav-btn" id="nav-dashboard" type="button" aria-pressed="false">Tableau de bord</button>
+      <button class="nav-btn" id="nav-watch" type="button" aria-pressed="false">Surveillance</button>
       <a href="#methode">Méthode</a>
       <a href="/docs" target="_blank" rel="noopener">API</a>
     </nav>
@@ -42,9 +43,17 @@
       </div>
       <h1>La surface d'attaque de votre site,<br /><span class="grad">en un clic.</span></h1>
       <p class="hero-sub">
-        Transport, TLS, en-têtes, cookies, CORS, fichiers oubliés, fuites d'information et DNS :
-        un rapport priorisé avec preuves et remédiations en quelques secondes.
+        Transport, TLS, en-têtes, secrets, dépendances tierces, e-mail et sous-domaines :
+        un rapport priorisé, une synthèse lisible par votre direction et un plan d'action
+        chiffré en quelques secondes.
       </p>
+      <div class="hero-chips" aria-label="Capacités clés">
+        <span>Synthèse exécutive</span>
+        <span>Chasse aux secrets</span>
+        <span>Certificate Transparency</span>
+        <span>Surveillance planifiée</span>
+        <span>100 % passif</span>
+      </div>
 
       <form id="scan-form" class="scan-form" autocomplete="off" novalidate>
         <label class="sr-only" for="target">Adresse du site à analyser</label>
@@ -130,12 +139,15 @@
               <circle cx="60" cy="60" r="52" class="gauge-fill" id="gauge-fill"/>
             </svg>
             <div class="gauge-center">
-              <span class="gauge-score" id="score">–</span>
+              <span class="gauge-score" id="score" aria-live="polite">–</span>
               <span class="gauge-grade" id="grade">–</span>
             </div>
           </div>
           <div class="summary-meta">
-            <h2 id="summary-title">Rapport d'analyse</h2>
+            <div class="summary-title-row">
+              <h2 id="summary-title">Rapport d'analyse</h2>
+              <span class="risk-pill" id="summary-risk" hidden></span>
+            </div>
             <p class="mono target-url" id="result-target"></p>
             <p class="muted" id="result-meta"></p>
             <p class="comparison" id="comparison" hidden></p>
@@ -147,6 +159,7 @@
         </div>
         <div class="summary-right">
           <div class="severity-grid" id="severity-grid"></div>
+          <div class="sev-ribbon" id="sev-ribbon" role="img" aria-label="Répartition des constats par sévérité"></div>
           <div class="actions">
             <button class="btn-ghost" id="export-json" type="button">JSON</button>
             <button class="btn-ghost" id="export-html" type="button">Rapport HTML</button>
@@ -158,7 +171,47 @@
         </div>
       </article>
 
-      <article class="panel priorities" id="priority-panel" hidden>
+      <article class="panel exec-panel" id="exec-panel" hidden>
+        <div class="exec-top">
+          <span class="exec-kicker">Synthèse exécutive</span>
+          <button class="btn-ghost btn-mini" id="copy-exec" type="button">Copier la synthèse</button>
+        </div>
+        <div class="exec-grid">
+          <div class="exec-copy">
+            <span class="risk-pill" id="exec-risk">—</span>
+            <p class="exec-headline" id="exec-headline" aria-live="polite"></p>
+            <p class="exec-paragraph" id="exec-paragraph"></p>
+            <div class="exec-lists">
+              <div>
+                <h3>Ce qui expose le plus</h3>
+                <ul class="exec-risks" id="exec-risks"></ul>
+              </div>
+              <div>
+                <h3>Ce qui tient déjà</h3>
+                <ul class="exec-strengths" id="exec-strengths"></ul>
+              </div>
+            </div>
+          </div>
+          <div class="exec-radar">
+            <div id="radar"></div>
+            <p class="muted small">Exposition relative par catégorie</p>
+          </div>
+        </div>
+      </article>
+
+      <div class="tabs" id="result-tabs" role="tablist" aria-label="Sections du rapport">
+        <button class="tab is-active" role="tab" data-tab="synthese" aria-selected="true">
+          Synthèse <span class="tab-count" id="tab-count-synthese"></span>
+        </button>
+        <button class="tab" role="tab" data-tab="constats" aria-selected="false">
+          Constats <span class="tab-count" id="tab-count-constats"></span>
+        </button>
+        <button class="tab" role="tab" data-tab="technique" aria-selected="false">
+          Technique <span class="tab-count" id="tab-count-technique"></span>
+        </button>
+      </div>
+
+      <article class="panel priorities" id="priority-panel" data-tab="synthese" hidden>
         <div class="panel-head">
           <h2>À corriger en priorité</h2>
           <span class="muted small">les trois constats qui comptent le plus</span>
@@ -166,6 +219,7 @@
         <ol class="priority-list" id="priority-list"></ol>
       </article>
 
+      <div class="tab-group" data-tab="constats">
       <div class="results-toolbar">
         <div class="filters" id="filters" role="group" aria-label="Filtrer par sévérité"></div>
         <label class="search">
@@ -181,8 +235,9 @@
       <p id="no-findings" class="panel empty-findings" hidden>
         Aucun constat pour ce filtre. 🌤️
       </p>
+      </div>
 
-      <article class="panel" id="plan-panel" hidden>
+      <article class="panel" id="plan-panel" data-tab="synthese" hidden>
         <div class="panel-head">
           <h2>Plan d'action</h2>
           <span class="muted small" id="plan-caption"></span>
@@ -190,7 +245,7 @@
         <div class="plan-cols" id="plan-cols"></div>
       </article>
 
-      <article class="panel" id="diff-panel" hidden>
+      <article class="panel" id="diff-panel" data-tab="synthese" hidden>
         <div class="panel-head">
           <h2>Évolution depuis la dernière analyse</h2>
           <span class="muted small" id="diff-caption"></span>
@@ -208,7 +263,7 @@
         <p class="muted small" id="diff-persistent"></p>
       </article>
 
-      <article class="panel" id="breakdown-panel">
+      <article class="panel" id="breakdown-panel" data-tab="synthese">
         <div class="panel-head">
           <h2>Composition du score</h2>
           <span class="muted small" id="breakdown-total"></span>
@@ -216,7 +271,7 @@
         <ul class="breakdown" id="breakdown"></ul>
       </article>
 
-      <div class="two-col">
+      <div class="two-col" data-tab="technique">
         <article class="panel">
           <div class="panel-head"><h2>Empreinte technique</h2></div>
           <dl class="fingerprint" id="fingerprint"></dl>
@@ -227,7 +282,7 @@
         </article>
       </div>
 
-      <article class="panel" id="pages-panel" hidden>
+      <article class="panel" id="pages-panel" data-tab="technique" hidden>
         <div class="panel-head">
           <h2>Pages analysées</h2>
           <span class="muted small" id="pages-count"></span>
@@ -235,7 +290,7 @@
         <ul class="pages" id="pages-list"></ul>
       </article>
 
-      <article class="panel" id="third-panel" hidden>
+      <article class="panel" id="third-panel" data-tab="technique" hidden>
         <div class="panel-head">
           <h2>Dépendances tierces</h2>
           <span class="muted small" id="third-count"></span>
@@ -247,7 +302,7 @@
         <ul class="third" id="third-list"></ul>
       </article>
 
-      <article class="panel" id="history-panel" hidden>
+      <article class="panel" id="history-panel" data-tab="technique" hidden>
         <div class="panel-head">
           <h2>Historique local</h2>
           <button class="btn-ghost" id="clear-history" type="button">Effacer</button>
@@ -276,6 +331,43 @@
       </div>
 
       <div class="kpis" id="kpis"></div>
+
+      <article class="panel" id="watch-panel">
+        <div class="panel-head">
+          <h2>Surveillance planifiée</h2>
+          <span class="muted small" id="watch-status"></span>
+        </div>
+        <p class="muted small">
+          Une réanalyse périodique détecte les régressions (en-tête supprimé, fichier qui réapparaît,
+          secret publié par erreur) et déclenche l'alerte webhook configurée.
+        </p>
+        <form class="watch-form" id="watch-form" autocomplete="off">
+          <input id="watch-host" name="host" placeholder="exemple.fr" spellcheck="false" required />
+          <select id="watch-profile" aria-label="Profil de surveillance">
+            <option value="quick">Rapide</option>
+            <option value="standard" selected>Standard</option>
+            <option value="deep">Approfondi</option>
+          </select>
+          <select id="watch-interval" aria-label="Fréquence">
+            <option value="6">Toutes les 6 h</option>
+            <option value="24" selected>Chaque jour</option>
+            <option value="168">Chaque semaine</option>
+          </select>
+          <button class="btn-primary" type="submit"><span class="btn-label">Surveiller</span></button>
+        </form>
+        <ul class="watch-list" id="watch-list"></ul>
+        <p class="muted small" id="watch-empty" hidden>
+          Aucune cible surveillée. Ajoute un domaine pour lancer un suivi automatique.
+        </p>
+      </article>
+
+      <article class="panel" id="trend-panel" hidden>
+        <div class="panel-head">
+          <h2>Tendance</h2>
+          <select id="trend-host" class="ghost-select" aria-label="Choisir la cible"></select>
+        </div>
+        <div class="trend" id="trend"></div>
+      </article>
 
       <article class="panel chart-panel" id="chart-panel" hidden>
         <div class="panel-head">
@@ -326,6 +418,8 @@
     </section>
   </main>
 
+  <div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
+
   <footer class="footer">
     <p>
       <strong>VulnLens</strong> — scanner passif. Aucune exploitation, aucun test destructif.
@@ -344,6 +438,7 @@
           <span class="finding-title"></span>
           <span class="finding-cat"></span>
         </span>
+        <span class="confidence" hidden></span>
         <span class="sev-badge"></span>
         <svg class="chev" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
           <path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>

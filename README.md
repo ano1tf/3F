@@ -8,15 +8,27 @@ Aucune exploitation, aucune injection, aucun contournement d'authentification : 
 visiteur peut observer.
 
 ```
-┌ VulnLens v4.0 ─────────────────────────────────────────────────────────────┐
-│  Score 33/100 — E      □□□□□□□□□□ 3 pages × 38 contrôles     ✓ vérifié     │
+┌ VulnLens v5.0 ─────────────────────────────────────────────────────────────┐
+│  Risque critique · score 8/100     3 pages · 11 familles de contrôles      │
 ├────────────────────────────────────────────────────────────────────────────┤
-│  Plan : 12 actions aujourd'hui · 7 ce sprint · 3 projets   (+47 pts)       │
-│  1 clé AWS exposée dans app.js · 4 domaines tiers · source map publique    │
+│  « Des accès ou des données sont exposés : à traiter immédiatement. »      │
+│  Ce qui expose : clé AWS dans app.js · .env public · source map publiée    │
+│  Ce qui tient  : HTTPS · HSTS · CSP · SPF/DMARC · aucun takeover détecté   │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
+
+## Ce que fait la v5
+
+| Capacité | Détail |
+|---|---|
+| **Synthèse exécutive** | Une page lisible par un décideur : niveau de risque, phrase de verdict, trois risques majeurs avec leur impact réel (« le code source fuit »), ce qui tient déjà, et un radar d'exposition par catégorie. |
+| **Surveillance planifiée** | Suivi par domaine (6 h / 24 h / hebdo) avec planificateur intégré, réanalyse automatique, alerte webhook en cas de régression et courbe de tendance. |
+| **Sous-domaines Certificate Transparency** | Lecture des journaux de certificats publics (crt.sh) : les noms d'hôtes oubliés apparaissent, puis entrent dans la détection de takeover. |
+| **Empreinte technique étendue** | WAF/CDN (Cloudflare, Akamai, Fastly, Imperva, Vercel…), CMS, frameworks, bibliothèques versionnées, analytique et langage serveur. |
+| **Niveau de confiance** | Chaque constat indique s'il est *certain*, *à vérifier* ou *à confirmer* : plus de faux positifs présentés comme des certitudes. |
+| **Refonte visuelle** | Onglets Synthèse / Constats / Technique, carte de risque, radar, courbe de tendance, micro-interactions et mode impression propres. |
 
 ## Ce que fait la v4
 
@@ -63,6 +75,11 @@ python -m app.cli scan https://exemple.fr --format sarif -o vulnlens.sarif
 
 # plan d'action seul (Markdown), idéal pour un ticket ou une revue de sprint
 python -m app.cli scan https://exemple.fr --format plan
+
+# surveillance : ajouter, lister, analyser à la demande
+python -m app.cli watch add exemple.fr --interval 24
+python -m app.cli watch list
+python -m app.cli watch run exemple.fr
 
 # vérifier la propriété d'un domaine avant de scanner
 python -m app.cli verify exemple.fr
@@ -132,6 +149,11 @@ empreinte technique, **pages analysées**, contrôles exécutés avec leur duré
 | `GET` | `/api/scans/{id}` | Rapport complet |
 | `GET` | `/api/scans/{id}/diff` | Écart avec l'analyse précédente du même hôte |
 | `GET` | `/api/scans/{id}/plan` | Plan de remédiation (quick / sprint / projet) + gain potentiel |
+| `GET` | `/api/watch` | Cibles surveillées, échéances et état du planificateur |
+| `POST` | `/api/watch` | Ajouter / mettre à jour une cible (`host`, `profile`, `interval_hours`) |
+| `POST` | `/api/watch/{host}/run` | Réanalyser immédiatement une cible surveillée |
+| `DELETE` | `/api/watch/{host}` | Retirer une cible |
+| `GET` | `/api/trend/{host}` | Série de scores pour la courbe de tendance |
 | `GET` | `/api/scans/{id}/report.html` | Export HTML |
 | `GET` | `/api/scans/{id}/sarif` | Export SARIF |
 | `GET` | `/api/scans/{id}/markdown` | Export Markdown |
@@ -151,6 +173,8 @@ Si `VULNLENS_TOKEN` est défini, toutes les routes `/api/*` (sauf `/api/health`)
 |---|---|---|
 | `VULNLENS_ALLOW_PRIVATE` | `0` | Autorise les cibles privées (labo, `127.0.0.1`) |
 | `VULNLENS_TOKEN` | vide | Protège l'API par jeton |
+| `VULNLENS_WATCH` | `0` | Active le planificateur de surveillance |
+| `VULNLENS_WATCH_TICK` | `300` | Fréquence de vérification des échéances (s) |
 | `VULNLENS_WEBHOOK` | vide | URL recevant les alertes (JSON `POST`) |
 | `VULNLENS_ALERT_THRESHOLD` | vide | Alerte si score `< seuil` |
 | `VULNLENS_ALERT_MIN_DROP` | `10` | Alerte si le score chute de N points |
@@ -175,6 +199,8 @@ app/
 ├─ verify.py          preuve de propriété (DNS TXT / .well-known)
 ├─ diffing.py         comparaison de deux rapports
 ├─ remediation.py     plan d'action (effort, priorité, gain de score)
+├─ narrative.py       synthèse exécutive, niveau de risque, radar, confiance
+├─ watch.py           surveillance planifiée (échéances, réanalyse, alertes)
 ├─ alerts.py          webhook best-effort
 ├─ db.py              SQLite, migrations, stats, analyse précédente
 ├─ reporting.py       HTML, SARIF, Markdown
@@ -187,6 +213,8 @@ app/
 │  ├─ checks_secrets.py   19 signatures de secrets + source maps
 │  ├─ checks_email.py     DMARC, SPF, DKIM, MTA-STS, TLS-RPT
 │  ├─ checks_thirdparty.py cartographie des dépendances tierces
+│  ├─ recon_ct.py          sous-domaines via Certificate Transparency
+│  ├─ tech.py              WAF, CDN, CMS, frameworks, analytique
 │  ├─ checks_tls.py   certificat, protocoles, chaîne
 │  ├─ checks_exposure.py  38 chemins sensibles (.git, .env, backups…)
 │  ├─ checks_content.py   formulaires, CSP, SRI, iframes, commentaires
@@ -204,23 +232,31 @@ liste des pages concernées, pour éviter les rapports de 300 lignes répétitiv
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest        # 169 tests
+.venv/bin/python -m pytest        # 205 tests
 .venv/bin/ruff check .
+
+# interface : rendu simulé (jsdom), aucune erreur JavaScript tolérée
+npm install                       # une seule fois (dev)
+npm run ui:check                  # parcours de scan + tableau de bord / tendance
 ```
 
 Couverture : normalisation et refus de cibles, scoring, en-têtes, contenu, DNS/deep, **crawl**,
 **agrégation**, **diff**, **alertes**, **vérification**, **takeover**, **secrets**, **e-mail**,
-**surface tierce**, **plan de remédiation**, persistance, API (historique, exports, jeton, diff,
-plan, verify), CLI, fixture serveur volontairement vulnérable (3 pages, clé AWS factice, source map).
+**surface tierce**, **plan de remédiation**, **synthèse exécutive**, **surveillance**, **Certificate
+Transparency**, **empreinte technique**, persistance, API (historique, exports, jeton, diff, plan,
+watch, trend, verify), CLI (`scan`, `verify`, `watch`), et un **test de fumée de l'interface** sous
+jsdom. Fixture serveur volontairement vulnérable : 3 pages, clé AWS factice, source map exposée.
 
 ---
 
 ## Feuille de route
 
 - [x] Plan d'action priorisé (quick / sprint / projet)
+- [x] Synthèse exécutive et radar de risque
+- [x] Surveillance planifiée avec alertes de régression
 - [x] Chasse aux secrets dans les bundles publics
 - [x] Cartographie des dépendances tierces
-- [ ] Suivi planifié (cron) avec rapport hebdomadaire par e-mail
+- [ ] Rapport hebdomadaire par e-mail (digest de la surveillance)
 - [ ] Règles personnalisées (`*.yaml`) pour les contrôles maison
 - [ ] Comparaison multi-sites (portefeuille)
 - [ ] Export PDF côté serveur (sans dépendance navigateur)

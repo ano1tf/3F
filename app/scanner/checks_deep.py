@@ -15,6 +15,7 @@ import string
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from ..models import Finding, Severity
+from . import recon_ct
 from .fetcher import Fetcher, HttpResponse
 
 CATEGORY = "Reconnaissance approfondie"
@@ -356,6 +357,7 @@ async def run_deep(fetcher: Fetcher, host: str, base_url: str) -> list[Finding]:
 
     zone_task = asyncio.create_task(check_zone_transfer(host))
     subs_task = asyncio.create_task(find_subdomains(host))
+    ct_task = asyncio.create_task(recon_ct.fetch_subdomains(fetcher, host))
     redirects = await check_open_redirect(fetcher, base_url)
     findings.extend(redirects)
 
@@ -369,6 +371,18 @@ async def run_deep(fetcher: Fetcher, host: str, base_url: str) -> list[Finding]:
         subdomains = {}
         subs_task.cancel()
 
+    try:
+        ct_names = await asyncio.wait_for(ct_task, timeout=12)
+    except Exception:  # noqa: BLE001
+        ct_names = []
+        ct_task.cancel()
+
+    if ct_names:
+        resolved = await recon_ct.resolve(ct_names)
+        for name, addresses in resolved.items():
+            subdomains.setdefault(name, addresses)
+        findings.append(_ct_finding(host, ct_names, len(resolved)))
+
     findings.extend(summarize_subdomains(host, subdomains))
     if subdomains:
         try:
@@ -377,3 +391,27 @@ async def run_deep(fetcher: Fetcher, host: str, base_url: str) -> list[Finding]:
             pass
 
     return findings
+
+
+def _ct_finding(host: str, names: list[str], resolved: int) -> Finding:
+    listing = "\n".join(f"  · {name}" for name in names[:20])
+    extra = f"\n  … et {len(names) - 20} autre(s)" if len(names) > 20 else ""
+    return Finding(
+        id="recon.ct-subdomains",
+        title=f"{len(names)} sous-domaine(s) publics dans les journaux de certificats",
+        severity=Severity.INFO,
+        category="Reconnaissance",
+        description="Les journaux de transparence des certificats (Certificate Transparency) "
+        "publient chaque nom d'hôte pour lequel un certificat a été émis. Un sous-domaine oublié "
+        "(staging, outil interne, ancien service) reste une porte d'entrée même s'il n'est plus "
+        "maintenu — c'est le terrain de jeu préféré des attaquants.",
+        evidence=(
+            f"{len(names)} nom(s) pour {host}, dont {resolved} qui répond(ent) aujourd'hui :"
+            f"\n{listing}{extra}"
+        ),
+        remediation="Inventoriez ces noms : supprimez les enregistrements DNS des services "
+        "abandonnés, protégez les environnements de test par authentification et surveillez les "
+        "nouvelles émissions de certificats pour votre domaine.",
+        reference="https://certificate.transparency.dev/",
+        confidence="certain",
+    )

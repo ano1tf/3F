@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 APP_NAME = "VulnLens"
-APP_VERSION = "4.0.0"
+APP_VERSION = "5.0.0"
 APP_TAGLINE = "Scanner de vulnérabilités web — en un clic"
 
 # Identité envoyée aux cibles scannées (transparence : on ne se cache pas).
@@ -37,3 +37,7 @@ ALERT_ON_CRITICAL = os.getenv("VULNLENS_ALERT_ON_CRITICAL", "1") in {"1", "true"
 
 # --- Protection de l'instance (vide = pas d'authentification) ---------------
 AUTH_TOKEN = os.getenv("VULNLENS_TOKEN", "").strip()
+
+# Surveillance planifiée (opt-in : sans activation, aucun scan automatique n'est lancé)
+WATCH_ENABLED = os.getenv("VULNLENS_WATCH", "0").strip().lower() in {"1", "true", "yes", "on"}
+WATCH_TICK_SECONDS = int(os.getenv("VULNLENS_WATCH_TICK", "300"))

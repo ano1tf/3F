@@ -126,6 +126,7 @@ def to_sarif(report: dict[str, Any]) -> dict[str, Any]:
                     "grade": report.get("grade"),
                     "scanId": report.get("scan_id"),
                     "profile": report.get("profile", "quick"),
+                    "riskLevel": (report.get("executive") or {}).get("risk_level", ""),
                     "domainVerified": bool(report.get("verified")),
                     "pagesAnalyzed": len(report.get("pages") or []),
                     "pages": [page.get("url") for page in (report.get("pages") or [])],
@@ -153,6 +154,26 @@ def to_markdown(report: dict[str, Any]) -> str:
         )),
         "",
     ]
+
+    executive = report.get("executive") or {}
+    if executive:
+        lines += [
+            f"**Risque {executive.get('risk_level', '')}** — {executive.get('headline', '')}",
+            "",
+            executive.get("paragraph", ""),
+            "",
+        ]
+        if executive.get("key_risks"):
+            lines.append("### Ce qui expose le plus")
+            lines += [
+                f"- **{item['title']}** ({item['severity_label']}) — {item['impact']}"
+                for item in executive["key_risks"]
+            ]
+            lines.append("")
+        if executive.get("strengths"):
+            lines.append("### Ce qui tient déjà")
+            lines += [f"- {item}" for item in executive["strengths"]]
+            lines.append("")
 
     plan = remediation.build_plan(report)
     if plan["available"]:
@@ -210,6 +231,43 @@ def to_markdown(report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _radar_svg(radar: list[dict[str, Any]], size: int = 260) -> str:
+    """Radar maison (aucune dépendance) : jusqu'à 6 axes, valeurs 0-100."""
+    import math
+
+    if not radar:
+        return ""
+    axes = radar[:6]
+    count = len(axes)
+    center = size / 2
+    radius = center - 34
+    rings = "".join(
+        f'<circle cx="{center}" cy="{center}" r="{radius * ratio:.1f}" fill="none" '
+        f'stroke="#e2e8f0" stroke-width="1"/>'
+        for ratio in (0.25, 0.5, 0.75, 1.0)
+    )
+    points, labels, spokes = [], [], []
+    for index, axis in enumerate(axes):
+        angle = (2 * math.pi * index / count) - math.pi / 2
+        ratio = max(0.04, min(1.0, (axis.get("value") or 0) / 100))
+        points.append(f"{center + radius * ratio * math.cos(angle):.1f},{center + radius * ratio * math.sin(angle):.1f}")
+        ex, ey = center + radius * math.cos(angle), center + radius * math.sin(angle)
+        spokes.append(f'<line x1="{center}" y1="{center}" x2="{ex:.1f}" y2="{ey:.1f}" stroke="#e2e8f0"/>')
+        lx, ly = center + (radius + 18) * math.cos(angle), center + (radius + 18) * math.sin(angle)
+        anchor = "middle" if abs(math.cos(angle)) < 0.3 else ("start" if math.cos(angle) > 0 else "end")
+        labels.append(
+            f'<text x="{lx:.1f}" y="{ly:.1f}" text-anchor="{anchor}" dominant-baseline="middle" '
+            f'font-size="9.5" fill="#64748b">{_e(str(axis.get("label", ""))[:18])}</text>'
+        )
+    return (
+        f'<svg viewBox="0 0 {size} {size}" width="100%" height="auto" role="img" '
+        f'aria-label="Exposition relative par catégorie">'
+        f"{rings}{''.join(spokes)}"
+        f'<polygon points="{" ".join(points)}" fill="rgba(194,34,58,.16)" stroke="#c0223a" stroke-width="1.8"/>'
+        f"{''.join(labels)}</svg>"
+    )
+
+
 def _diff_items(items: Any) -> str:
     entries = items or []
     if not entries:
@@ -233,6 +291,7 @@ def to_html(report: dict[str, Any]) -> str:
     fingerprint = report.get("fingerprint") or {}
     checks = report.get("checks") or []
     pages = report.get("pages") or []
+    executive = report.get("executive") or {}
     verified = bool(report.get("verified"))
     diff = report.get("diff") or {}
     score = int(report.get("score") or 0)
@@ -268,6 +327,7 @@ def to_html(report: dict[str, Any]) -> str:
             </span>
             <h3>{_e(finding["title"])}</h3>
             <span class="cat">{_e(finding.get("category", ""))}</span>
+            {f'<span class="conf">{_e("à vérifier" if finding.get("confidence") == "probable" else "à confirmer")}</span>' if finding.get("confidence") not in (None, "certain") else ""}
           </header>
           <p class="desc">{_e(finding.get("description", ""))}</p>
           <div class="block"><h4>Preuve</h4><pre>{_e(finding.get("evidence") or "—")}</pre></div>
@@ -344,6 +404,31 @@ def to_html(report: dict[str, Any]) -> str:
             f'<div class="plan-cols">{"".join(columns)}</div></div>'
         )
 
+    executive_html = ""
+    if executive:
+        risks = "".join(
+            f'<li><span class="sev" data-sev="{_e(item["severity"])}">'
+            f'{_e(item["severity_label"])}</span>'
+            f'<strong>{_e(item["title"])}</strong><em>{_e(item["impact"])}</em></li>'
+            for item in executive.get("key_risks", [])
+        )
+        strengths = "".join(f"<li>{_e(item)}</li>" for item in executive.get("strengths", []))
+        radar_svg = _radar_svg(executive.get("radar") or [])
+        executive_html = f'''
+  <h2>Synthèse</h2>
+  <div class="panel exec">
+    <div class="exec-main">
+      <span class="risk risk-{_e(executive.get("risk_level"))}">Risque {_e(executive.get("risk_level"))}</span>
+      <p class="exec-headline">{_e(executive.get("headline"))}</p>
+      <p class="exec-paragraph">{_e(executive.get("paragraph"))}</p>
+      <h4>Ce qui expose le plus</h4>
+      <ul class="exec-risks">{risks or "<li>Aucun risque majeur détecté.</li>"}</ul>
+      <h4>Ce qui tient déjà</h4>
+      <ul class="exec-strengths">{strengths or "<li>Pas encore d'élément solide à mettre en avant.</li>"}</ul>
+    </div>
+    <div class="exec-radar">{radar_svg}<p class="muted">Exposition relative par catégorie</p></div>
+  </div>'''
+
     third_html = ""
     if report.get("third_parties"):
         rows = "".join(
@@ -404,6 +489,8 @@ def to_html(report: dict[str, Any]) -> str:
   .badge {{ font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.08em;
             border:1px solid; border-radius:999px; padding:2px 8px; }}
   .cat {{ font-size:11.5px; color:var(--muted); }}
+  .conf {{ font-size:10px; text-transform:uppercase; letter-spacing:.06em; color:#8a5a12;
+           background:#fdf3d7; border:1px solid #f0d79a; border-radius:999px; padding:1px 8px; }}
   .desc {{ margin:10px 0 0; font-size:14px; }}
   h4 {{ font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); margin:14px 0 6px; }}
   pre {{ background:#f3f6fa; border:1px solid var(--line); border-radius:8px; padding:10px 12px;
@@ -437,6 +524,28 @@ def to_html(report: dict[str, Any]) -> str:
   ul.pages .code {{ font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11px; color:#1b8a5a; }}
   ul.pages em {{ margin-left:auto; color:var(--muted); font-style:normal; font-size:11.5px; }}
   .muted {{ color:var(--muted); font-size:12.5px; }}
+  .exec {{ display:grid; grid-template-columns:1.6fr 1fr; gap:22px; align-items:start; }}
+  .exec-headline {{ font-size:15px; font-weight:700; margin:10px 0 6px; }}
+  .exec-paragraph {{ margin:0 0 14px; color:#334155; font-size:13.5px; }}
+  .exec-risks {{ list-style:none; margin:0 0 14px; padding:0; }}
+  .exec-risks li {{ padding:7px 0; border-bottom:1px dashed var(--line); font-size:12.5px; }}
+  .exec-risks li:last-child {{ border-bottom:0; }}
+  .exec-risks strong {{ display:block; }}
+  .exec-risks em {{ display:block; color:var(--muted); font-style:normal; font-size:11.5px; }}
+  .exec-risks .sev {{ font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; margin-right:6px; }}
+  .exec-risks .sev[data-sev="critical"] {{ color:#c0223a; }}
+  .exec-risks .sev[data-sev="high"] {{ color:#c25a12; }}
+  .exec-risks .sev[data-sev="medium"] {{ color:#b8860b; }}
+  .exec-strengths {{ margin:0; padding-left:18px; font-size:12.5px; color:#14532d; }}
+  .exec-strengths li {{ margin:4px 0; }}
+  .exec-radar {{ text-align:center; }}
+  .risk {{ display:inline-block; font-size:11px; font-weight:700; text-transform:uppercase;
+           letter-spacing:.08em; border-radius:999px; padding:3px 10px; }}
+  .risk-critique {{ color:#7f1d1d; background:#fee2e2; border:1px solid #fca5a5; }}
+  .risk-élevé {{ color:#7c2d12; background:#ffedd5; border:1px solid #fdba74; }}
+  .risk-modéré {{ color:#713f12; background:#fef9c3; border:1px solid #fde047; }}
+  .risk-faible {{ color:#14532d; background:#dcfce7; border:1px solid #86efac; }}
+  @media (max-width: 820px) {{ .exec {{ grid-template-columns:1fr; }} }}
   .plan-cols {{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }}
   .plan-col h4 {{ margin-top:0; }}
   .plan-detail {{ margin:0 0 10px; font-size:12px; color:var(--muted); }}
@@ -493,7 +602,8 @@ def to_html(report: dict[str, Any]) -> str:
 
   {f'<h2>À corriger en priorité</h2><div class="panel"><ol class="priority">{priority_html}</ol></div>' if priority_html else ""}
 
-  {plan_html}
+  {executive_html}
+{plan_html}
 {diff_html}
 {pages_html}
 

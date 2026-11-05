@@ -144,3 +144,47 @@ def test_cli_plan_format(capsys):
     output = cli._render(report, "plan")
     assert "Bloquez .git/" in output
     assert "Score actuel" in output
+
+
+def test_cli_watch_lifecycle(temp_db, capsys, monkeypatch):
+
+    from app import cli
+
+    monkeypatch.setenv("VULNLENS_DB", str(temp_db))
+
+    assert cli.main(["watch", "add", "https://cible.test/", "--interval", "12"]) == cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "cible.test" in out and "12 h" in out
+
+    assert cli.main(["watch", "list", "--json"]) == cli.EXIT_OK
+    payload = json.loads(capsys.readouterr().out)
+    assert payload[0]["host"] == "cible.test"
+    assert payload[0]["interval_hours"] == 12
+
+    assert cli.main(["watch", "remove", "cible.test"]) == cli.EXIT_OK
+    assert "retiré" in capsys.readouterr().out
+
+    assert cli.main(["watch", "remove", "cible.test"]) == cli.EXIT_THRESHOLD
+    assert "n'est pas surveillé" in capsys.readouterr().err
+
+
+def test_cli_watch_run_requires_existing_entry(temp_db, capsys):
+    from app import cli
+
+    assert cli.main(["watch", "run", "inconnu.test"]) == cli.EXIT_THRESHOLD
+    assert "n'est pas surveillé" in capsys.readouterr().err
+
+
+def test_cli_watch_run_reports_score(temp_db, capsys, monkeypatch):
+    from app import cli, watch
+
+    assert cli.main(["watch", "add", "cible.test"]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    async def fake_run(_entry):
+        return {"host": "cible.test", "score": 91, "grade": "A", "findings": 2, "scan_id": "abc"}
+
+    monkeypatch.setattr(watch, "run_watch", fake_run)
+    assert cli.main(["watch", "run", "cible.test"]) == cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "91/100" in out and "2 constat(s)" in out

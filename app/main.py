@@ -6,7 +6,7 @@ import asyncio
 import json
 import time
 from collections import defaultdict, deque
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
@@ -21,7 +21,7 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import alerts, config, db, diffing, remediation, reporting, verify
+from . import alerts, config, db, diffing, remediation, reporting, verify, watch
 from .models import SEVERITY_LABELS_FR
 from .safety import ScanError, normalize_target
 from .scanner.engine import run_scan
@@ -32,7 +32,18 @@ STATIC_DIR = BASE_DIR / "static"
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     await db.init()
-    yield
+    stop = asyncio.Event()
+    task: asyncio.Task | None = None
+    if config.WATCH_ENABLED:
+        task = asyncio.create_task(watch.scheduler_loop(stop), name="vulnlens-watch")
+    try:
+        yield
+    finally:
+        if task is not None:
+            stop.set()
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
 
 
 app = FastAPI(
@@ -70,6 +81,13 @@ _SEMAPHORE = asyncio.Semaphore(config.MAX_CONCURRENT_SCANS)
 _RATE_LIMIT: dict[str, deque[float]] = defaultdict(deque)
 _RATE_WINDOW = 300.0
 _RATE_MAX = 15
+
+
+class WatchRequest(BaseModel):
+    host: str = Field(min_length=1, max_length=253)
+    profile: Literal["quick", "standard", "deep"] = "standard"
+    interval_hours: int = Field(default=24, ge=1, le=24 * 30)
+    enabled: bool = True
 
 
 class ScanRequest(BaseModel):
@@ -161,7 +179,12 @@ async def meta() -> dict:
             "Surface tierce : domaines chargés, rôles, formulaires qui pointent à l'extérieur",
             "Source maps exposées",
             "Plan d'action : quick/sprint/projet avec gain de score potentiel",
+            "Synthèse exécutive : niveau de risque, impacts réels, points forts, radar",
+            "Sous-domaines passifs via Certificate Transparency (crt.sh)",
+            "Empreinte technique : WAF, CDN, CMS, frameworks, bibliothèques, analytique",
+            "Surveillance planifiée : réanalyse périodique et alerte de régression",
         ],
+        "watch": {"enabled": config.WATCH_ENABLED, "tick_seconds": config.WATCH_TICK_SECONDS},
         "limits": [
             "Aucune tentative d'exploitation, aucune charge destructive",
             "Aucun test d'injection, de force brute ou de déni de service",
@@ -273,6 +296,18 @@ def _host_of(url: str) -> str:
     return (urlsplit(url).hostname or "").lower()
 
 
+def _watch_target(raw: str) -> str:
+    """Clé de surveillance : domaine + port éventuel (https://exemple.fr:8443 → exemple.fr:8443)."""
+    try:
+        parsed = urlsplit(normalize_target(raw))
+    except ScanError as exc:
+        raise HTTPException(status_code=400, detail=exc.message) from exc
+    netloc = (parsed.netloc or "").lower()
+    if not netloc:
+        raise HTTPException(status_code=400, detail="Nom d'hôte invalide.")
+    return netloc
+
+
 def _clean_host(raw: str) -> str:
     try:
         parsed = urlsplit(normalize_target(raw))
@@ -293,6 +328,62 @@ async def api_scans(host: str | None = None, limit: int = 50) -> dict:
 async def api_stats() -> dict:
     """Indicateurs du tableau de bord : volume, score moyen, tendance, sévérités."""
     return await db.stats()
+
+
+@app.get("/api/watch")
+async def api_watch_list() -> dict:
+    """Cibles surveillées, avec échéance et état du planificateur."""
+    entries = watch.describe(await db.list_watches())
+    return {
+        "scheduler": config.WATCH_ENABLED,
+        "tick_seconds": config.WATCH_TICK_SECONDS,
+        "items": entries,
+    }
+
+
+@app.post("/api/watch")
+async def api_watch_add(payload: WatchRequest) -> dict:
+    """Ajoute ou met à jour une cible surveillée."""
+    host = _watch_target(payload.host)
+    entry = await db.upsert_watch(host, payload.profile, payload.interval_hours, payload.enabled)
+    return {"ok": True, "item": watch.describe([entry])[0]}
+
+
+@app.delete("/api/watch/{host}")
+async def api_watch_delete(host: str) -> dict:
+    deleted = await db.delete_watch(_watch_target(host))
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Cible non surveillée.")
+    return {"deleted": True, "host": host}
+
+
+@app.post("/api/watch/{host}/run")
+async def api_watch_run(host: str) -> dict:
+    """Lance immédiatement l'analyse d'une cible surveillée."""
+    cleaned = _watch_target(host)
+    entries = {entry["host"]: entry for entry in await db.list_watches()}
+    entry = entries.get(cleaned)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Cible non surveillée.")
+    try:
+        return await watch.run_watch(entry)
+    except ScanError as exc:
+        raise HTTPException(status_code=400, detail=exc.message) from exc
+
+
+@app.get("/api/trend/{host}")
+async def api_trend(host: str, limit: int = 30) -> dict:
+    """Série de scores pour tracer une courbe de tendance par hôte."""
+    cleaned = _clean_host(host)
+    scans = await db.list_scans(host=cleaned, limit=max(2, min(limit, 100)))
+    ordered = list(reversed(scans))
+    return {
+        "host": cleaned,
+        "points": [
+            {"date": scan["created_at"], "score": scan["score"], "scan_id": scan["id"]}
+            for scan in ordered
+        ],
+    }
 
 
 @app.get("/api/scans/{scan_id}/plan")

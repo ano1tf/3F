@@ -4,6 +4,8 @@ Exemples :
     python -m app.cli scan https://exemple.fr
     python -m app.cli scan exemple.fr --profile deep --fail-under 80
     python -m app.cli scan exemple.fr --format sarif --output vulnlens.sarif.json
+    python -m app.cli watch add exemple.fr --interval 24
+    python -m app.cli watch run exemple.fr
 """
 
 from __future__ import annotations
@@ -41,7 +43,12 @@ def _print_summary(report) -> None:
     counts = report.counts
     total = sum(counts.values())
     print(f"\n{config.APP_NAME} — {report.final_url or report.target}", file=sys.stderr)
-    print(f"Score : {report.score}/100 (note {report.grade}) en {report.duration_ms} ms", file=sys.stderr)
+    risk = (report.executive or {}).get("risk_level", "")
+    suffix = f" · risque {risk}" if risk else ""
+    print(
+        f"Score : {report.score}/100 (note {report.grade}) en {report.duration_ms} ms{suffix}",
+        file=sys.stderr,
+    )
     line = " · ".join(
         f"{counts.get(severity.value, 0)} {severity.value}"
         for severity in Severity
@@ -53,6 +60,74 @@ def _print_summary(report) -> None:
         print("\nÀ corriger en priorité :", file=sys.stderr)
         for finding in top:
             print(f"  {finding.severity.value.upper():8} {finding.title}", file=sys.stderr)
+
+
+async def _watch_command(args: argparse.Namespace) -> int:
+    from . import watch as watch_module
+
+    await db.init()
+
+    if args.watch_command == "list":
+        entries = watch_module.describe(await db.list_watches())
+        if args.json:
+            print(json.dumps(entries, ensure_ascii=False, indent=2))
+            return EXIT_OK
+        if not entries:
+            print("Aucune cible surveillée. Ajoutez-en une avec : vulnlens watch add exemple.fr")
+            return EXIT_OK
+        print(f"{'CIBLE':32} {'PROFIL':9} {'FRÉQ.':6} {'ÉTAT':8} {'SCORE':6} PROCHAIN")
+        for entry in entries:
+            score = "—" if entry["last_score"] is None else str(entry["last_score"])
+            state = "actif" if entry["enabled"] else "pause"
+            next_run = entry["next_run"] or "—"
+            print(
+                f"{entry['host'][:32]:32} {entry['profile']:9} {entry['interval_hours']:>3} h  "
+                f"{state:8} {score:6} {next_run}"
+            )
+        return EXIT_OK
+
+    if args.watch_command == "add":
+        try:
+            host = urlsplit(normalize_target(args.target)).hostname or args.target
+        except ScanError as exc:
+            print(f"Domaine invalide : {exc.message}", file=sys.stderr)
+            return EXIT_ERROR
+        entry = await db.upsert_watch(host, args.profile, args.interval, True)
+        print(
+            f"{entry['host']} surveillé · profil {entry['profile']} · "
+            f"toutes les {entry['interval_hours']} h"
+        )
+        return EXIT_OK
+
+    if args.watch_command == "remove":
+        try:
+            host = urlsplit(normalize_target(args.target)).hostname or args.target
+        except ScanError as exc:
+            print(f"Domaine invalide : {exc.message}", file=sys.stderr)
+            return EXIT_ERROR
+        if await db.delete_watch(host):
+            print(f"{host} retiré de la surveillance")
+            return EXIT_OK
+        print(f"{host} n'est pas surveillé", file=sys.stderr)
+        return EXIT_THRESHOLD
+
+    # run
+    try:
+        host = urlsplit(normalize_target(args.target)).hostname or args.target
+    except ScanError as exc:
+        print(f"Domaine invalide : {exc.message}", file=sys.stderr)
+        return EXIT_ERROR
+    entries = {entry["host"]: entry for entry in await db.list_watches()}
+    entry = entries.get(host)
+    if entry is None:
+        print(f"{host} n'est pas surveillé (ajoutez-le avec : vulnlens watch add {host})", file=sys.stderr)
+        return EXIT_THRESHOLD
+    result = await watch_module.run_watch(entry)
+    print(
+        f"{result['host']} · score {result['score']}/100 ({result['grade']}) · "
+        f"{result['findings']} constat(s) · analyse {result['scan_id']}"
+    )
+    return EXIT_OK
 
 
 async def _verify(host: str, show_token_only: bool) -> int:
@@ -120,6 +195,23 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--verbose", "-v", action="store_true", help="Afficher la progression")
     scan.add_argument("--quiet", "-q", action="store_true", help="N'afficher que le rapport")
 
+    watch_parser = sub.add_parser("watch", help="Gérer la surveillance planifiée")
+    watch_sub = watch_parser.add_subparsers(dest="watch_command", required=True)
+
+    watch_list = watch_sub.add_parser("list", help="Lister les cibles surveillées")
+    watch_list.add_argument("--json", action="store_true", help="Sortie JSON")
+
+    watch_add = watch_sub.add_parser("add", help="Ajouter ou mettre à jour une cible")
+    watch_add.add_argument("target", help="Domaine à surveiller")
+    watch_add.add_argument("--profile", choices=["quick", "standard", "deep"], default="standard")
+    watch_add.add_argument("--interval", type=int, default=24, metavar="HEURES")
+
+    watch_remove = watch_sub.add_parser("remove", help="Retirer une cible")
+    watch_remove.add_argument("target", help="Domaine à retirer")
+
+    watch_run = watch_sub.add_parser("run", help="Analyser maintenant une cible surveillée")
+    watch_run.add_argument("target", help="Domaine à analyser")
+
     verify_parser = sub.add_parser(
         "verify", help="Vérifier la propriété d'un domaine (DNS TXT ou .well-known)"
     )
@@ -162,6 +254,9 @@ def _render(report_dict: dict, fmt: str) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.command == "watch":
+        return asyncio.run(_watch_command(args))
 
     if args.command == "verify":
         return asyncio.run(_verify(args.host, args.show_token))
