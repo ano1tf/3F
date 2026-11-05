@@ -25,7 +25,7 @@
         </svg>
       </span>
       <span class="brand-name">VulnLens</span>
-      <span class="brand-tag">v5.0</span>
+      <span class="brand-tag">v6.0</span>
     </a>
     <nav class="topnav">
       <button class="nav-btn" id="nav-analyzer" type="button" aria-pressed="true">Analyser</button>
@@ -203,6 +203,9 @@
         <button class="tab is-active" role="tab" data-tab="synthese" aria-selected="true">
           Synthèse <span class="tab-count" id="tab-count-synthese"></span>
         </button>
+        <button class="tab" role="tab" data-tab="situation" aria-selected="false">
+          Situation <span class="tab-count" id="tab-count-situation"></span>
+        </button>
         <button class="tab" role="tab" data-tab="constats" aria-selected="false">
           Constats <span class="tab-count" id="tab-count-constats"></span>
         </button>
@@ -210,6 +213,18 @@
           Technique <span class="tab-count" id="tab-count-technique"></span>
         </button>
       </div>
+
+      <article class="panel" id="situation-panel" data-tab="situation" hidden>
+        <div class="panel-head">
+          <h2>Rapport de situation</h2>
+          <span class="muted small">les failles les plus dangereuses, cotées de 1 à 10</span>
+        </div>
+        <p class="muted small">
+          Pour chaque faille : comment on y arrive, ce qu'elle révèle, et à quel point elle est
+          dangereuse. Aucune charge exploitable n'est fournie — le but est de décider quoi corriger.
+        </p>
+        <div class="situation-grid" id="situation-list"></div>
+      </article>
 
       <article class="panel priorities" id="priority-panel" data-tab="synthese" hidden>
         <div class="panel-head">
@@ -439,6 +454,7 @@
           <span class="finding-cat"></span>
         </span>
         <span class="confidence" hidden></span>
+        <span class="danger-chip" hidden></span>
         <span class="sev-badge"></span>
         <svg class="chev" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
           <path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
@@ -446,6 +462,14 @@
       </button>
       <div class="finding-body">
         <p class="finding-desc"></p>
+        <div class="block">
+          <h3>Comment y arriver</h3>
+          <ol class="access"></ol>
+        </div>
+        <div class="block">
+          <h3>Ce que ça révèle</h3>
+          <p class="reveals"></p>
+        </div>
         <div class="block">
           <h3>Preuve</h3>
           <pre class="evidence mono"></pre>

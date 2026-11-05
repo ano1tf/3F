@@ -130,6 +130,7 @@ def build(report: dict[str, Any]) -> dict[str, Any]:
     critical = int(counts.get("critical", 0))
     high = int(counts.get("high", 0))
     total = len(findings)
+    danger_max = max((int(finding.get("danger") or 0) for finding in findings), default=0)
 
     if critical:
         headline = (
@@ -156,6 +157,8 @@ def build(report: dict[str, Any]) -> dict[str, Any]:
         f"de contrôles. {sentence} "
         f"{total} constat(s) au total, dont {critical} critique(s) et {high} élevé(s)."
     )
+    if danger_max:
+        paragraph += f" Le constat le plus dangereux est coté {danger_max}/10."
     if third_parties:
         paragraph += (
             f" Le site charge {len(third_parties)} domaine(s) tiers, autant de dépendances "
@@ -199,6 +202,7 @@ def build(report: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "risk_level": level,
+        "danger_max": danger_max,
         "radar": radar,
         "score": score,
         "grade": report.get("grade", ""),

@@ -1188,3 +1188,49 @@ ul.exec-strengths li::before { content: "✓"; color: var(--ok); font-weight: 70
   animation: spin .7s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ==================== v6.0 : rapport de situation, dangerosité ==================== */
+
+.danger-chip {
+  font-size: 10.5px; font-weight: 700; letter-spacing: .04em;
+  border-radius: 999px; padding: 2px 9px; border: 1px solid transparent;
+}
+.danger-chip[data-tier="high"] { color: #ffd6de; background: rgba(255, 59, 92, .16); border-color: rgba(255, 59, 92, .45); }
+.danger-chip[data-tier="mid"] { color: #ffe6c9; background: rgba(255, 138, 61, .14); border-color: rgba(255, 138, 61, .4); }
+.danger-chip[data-tier="low"] { color: #cfe6ff; background: rgba(76, 201, 240, .12); border-color: rgba(76, 201, 240, .38); }
+
+.danger {
+  display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: 11px; color: var(--muted);
+}
+.danger-blocks { display: flex; gap: 2px; }
+.danger-blocks span {
+  width: 9px; height: 15px; border-radius: 2px;
+  background: rgba(255, 255, 255, .08);
+}
+.danger-blocks span.on { background: linear-gradient(180deg, #ff5c75, #c0223a); }
+.danger-blocks span.on:nth-child(n+9) { background: linear-gradient(180deg, #ff3b5c, #8f0f22); }
+.danger b { color: #f2f7ff; font-size: 12px; }
+.danger em { font-style: normal; color: var(--muted); }
+
+ol.access { margin: 0; padding-left: 18px; font-size: 13px; color: #c3d3e6; }
+ol.access li { margin: 5px 0; }
+.reveals { margin: 0; font-size: 13px; color: #c3d3e6; }
+.finding[data-danger="9"] .finding-head,
+.finding[data-danger="10"] .finding-head { border-left: 2px solid rgba(255, 59, 92, .55); }
+
+.situation-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+.situation-card {
+  border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px;
+  background: rgba(255, 255, 255, .02);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.situation-card h3 { margin: 0; font-size: 15px; letter-spacing: -.01em; }
+.situation-card .sit-top { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+.situation-card .sit-cat { margin: 0; font-size: 11.5px; color: var(--muted); }
+.situation-card h4 {
+  margin: 2px 0 0; font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
+}
+.situation-card .sit-fix { margin: 0; font-size: 12.5px; color: #b7e7cf; }
+.situation-card .sit-fix strong { color: #d6f5e5; }
+.situation-card ol { margin: 0; }

@@ -137,3 +137,22 @@ def test_foreign_form_finding_is_not_duplicated(vulnerable_server):
     ids = {finding.id for finding in report.findings}
     assert "surface.foreign-form-action" in ids
     assert "content.external-form-action" not in ids
+
+
+def test_findings_carry_situation_and_danger(vulnerable_server):
+    events: list[dict] = []
+
+    async def emit(payload: dict) -> None:
+        events.append(payload)
+
+    asyncio.run(run_scan(vulnerable_server.url, emit, profile="standard"))
+    payload = next(event for event in events if event.get("type") == "result")["report"]
+    critical = next(f for f in payload["findings"] if f["id"] == "exposure.git")
+
+    assert 1 <= critical["danger"] <= 10
+    assert critical["danger"] >= 9
+    assert critical["access"] and all(isinstance(step, str) for step in critical["access"])
+    assert critical["reveals"]
+    assert critical["danger_label"]
+    assert payload["executive"]["danger_max"] >= 9
+    assert all(finding.get("danger") for finding in payload["findings"])

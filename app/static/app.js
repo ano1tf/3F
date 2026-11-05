@@ -325,6 +325,7 @@
     });
 
     renderExecutive(report);
+    renderSituation(report);
     renderFilters(report.findings || []);
     renderFindings();
     renderPriorities(report);
@@ -448,6 +449,22 @@
       $(".finding-title", node).textContent = finding.title;
       $(".finding-cat", node).textContent = finding.category;
       $(".sev-badge", node).textContent = finding.severity_label || severityLabel(finding.severity);
+      if (finding.danger) {
+        const chip = $(".danger-chip", node);
+        chip.hidden = false;
+        chip.textContent = `Danger ${finding.danger}/10`;
+        chip.dataset.tier = finding.danger >= 9 ? "high" : finding.danger >= 6 ? "mid" : "low";
+        chip.title = finding.danger_label || "";
+        node.dataset.danger = String(finding.danger);
+      }
+
+      const access = $(".access", node);
+      (finding.access || []).forEach((step) => access.appendChild(el("li", null, step)));
+      if (!(finding.access || []).length) {
+        access.appendChild(el("li", null, "Chemin d'accès non détaillé pour ce constat."));
+      }
+      $(".reveals", node).textContent = finding.reveals || "Impact non détaillé.";
+
       const confidence = $(".confidence", node);
       if (finding.confidence && finding.confidence !== "certain") {
         confidence.hidden = false;
@@ -1220,7 +1237,7 @@
 
   /* -------------------------------- Onglets ------------------------------- */
 
-  const TABS = ["synthese", "constats", "technique"];
+  const TABS = ["synthese", "situation", "constats", "technique"];
 
   function switchTab(name) {
     if (!TABS.includes(name)) return;
@@ -1239,6 +1256,7 @@
     const findings = (report.findings || []).length;
     const technical = (report.checks || []).length + (report.pages || []).length;
     $("#tab-count-constats").textContent = findings || "";
+    $("#tab-count-situation").textContent = Math.min(5, findings) || "";
     $("#tab-count-technique").textContent = technical || "";
     $("#tab-count-synthese").textContent = (report.priorities || []).length || "";
   }
@@ -1293,7 +1311,8 @@
     }
 
     $("#exec-headline").textContent = executive.headline || "";
-    $("#exec-paragraph").textContent = executive.paragraph || "";
+    const dangerText = executive.danger_max ? ` · danger max ${executive.danger_max}/10` : "";
+    $("#exec-paragraph").textContent = (executive.paragraph || "") + dangerText;
 
     const risks = $("#exec-risks");
     risks.innerHTML = "";
@@ -1322,6 +1341,80 @@
     }
 
     $("#radar").innerHTML = radarSvg(executive.radar || []);
+  }
+
+  /* --------------------------- Rapport de situation ------------------------ */
+
+  function dangerMeter(value, label) {
+    const wrapper = el("div", "danger");
+    const blocks = el("div", "danger-blocks");
+    for (let index = 0; index < 10; index += 1) {
+      blocks.appendChild(el("span", index < value ? "on" : "off"));
+    }
+    wrapper.appendChild(blocks);
+    wrapper.appendChild(el("b", null, `${value}/10`));
+    if (label) wrapper.appendChild(el("em", null, label));
+    return wrapper;
+  }
+
+  function renderSituation(report) {
+    const panel = $("#situation-panel");
+    const host = $("#situation-list");
+    const findings = [...(report.findings || [])];
+    if (!findings.length) {
+      panel.hidden = true;
+      host.innerHTML = "";
+      return;
+    }
+    panel.hidden = false;
+    host.innerHTML = "";
+
+    findings
+      .sort((a, b) => (b.danger || 0) - (a.danger || 0))
+      .slice(0, 5)
+      .forEach((finding) => {
+        const card = el("article", "situation-card");
+        const top = el("div", "sit-top");
+        top.appendChild(el("h3", null, finding.title));
+        top.appendChild(dangerMeter(finding.danger || 0, ""));
+        card.appendChild(top);
+        card.appendChild(
+          el(
+            "p",
+            "sit-cat",
+            `${finding.category || ""} · ${finding.severity_label || severityLabel(finding.severity)}` +
+              (finding.skill ? ` · compétence ${finding.skill}` : "")
+          )
+        );
+
+        card.appendChild(el("h4", null, "Comment y arriver"));
+        const steps = el("ol", "access");
+        (finding.access || []).forEach((step) => steps.appendChild(el("li", null, step)));
+        if (!(finding.access || []).length) {
+          steps.appendChild(el("li", null, "Chemin d'accès non détaillé."));
+        }
+        card.appendChild(steps);
+
+        card.appendChild(el("h4", null, "Ce que ça révèle"));
+        card.appendChild(el("p", "reveals", finding.reveals || "Impact non détaillé."));
+
+        const fix = el("p", "sit-fix");
+        fix.appendChild(el("strong", null, "Correction : "));
+        fix.appendChild(document.createTextNode(finding.remediation || "À définir."));
+        card.appendChild(fix);
+
+        card.addEventListener("click", () => {
+          switchTab("constats");
+          const node = document.querySelector(`.finding[data-id="${finding.id}"]`);
+          if (node) {
+            node.classList.add("open");
+            const head = node.querySelector(".finding-head");
+            if (head) head.setAttribute("aria-expanded", "true");
+            node.scrollIntoView({ behavior: "smooth", block: "center" });
+          }
+        });
+        host.appendChild(card);
+      });
   }
 
   /* ----------------------------- Surveillance ----------------------------- */

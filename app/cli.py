@@ -59,7 +59,11 @@ def _print_summary(report) -> None:
     if top:
         print("\nÀ corriger en priorité :", file=sys.stderr)
         for finding in top:
-            print(f"  {finding.severity.value.upper():8} {finding.title}", file=sys.stderr)
+            danger = f" — danger {finding.danger}/10" if finding.danger else ""
+            print(
+                f"  {finding.severity.value.upper():8} {finding.title}{danger}",
+                file=sys.stderr,
+            )
 
 
 async def _watch_command(args: argparse.Namespace) -> int:
@@ -243,7 +247,8 @@ def _render(report_dict: dict, fmt: str) -> str:
         "",
     ]
     for finding in report_dict["findings"]:
-        lines.append(f"[{finding['severity_label'].upper():11}] {finding['title']}")
+        danger = f" · danger {finding['danger']}/10" if finding.get("danger") else ""
+        lines.append(f"[{finding['severity_label'].upper():11}] {finding['title']}{danger}")
         if finding.get("evidence"):
             lines.append(f"              {finding['evidence'].splitlines()[0][:120]}")
     if len(lines) == 3:

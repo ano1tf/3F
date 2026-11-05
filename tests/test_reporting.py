@@ -245,3 +245,40 @@ def test_markdown_includes_executive_summary():
     markdown = reporting.to_markdown(report)
     assert "**Risque critique**" in markdown
     assert "### Ce qui expose le plus" in markdown
+
+
+def test_html_includes_situation_report_and_danger_meter():
+    from app import attack
+
+    report = sample_report()
+    attack.annotate(report["findings"], "https://cible.test")
+    report["executive"] = {"risk_level": "élevé", "headline": "h", "paragraph": "p",
+                           "key_risks": [], "strengths": [], "radar": [], "danger_max": 10}
+    html = reporting.to_html(report)
+    assert "Rapport de situation" in html
+    assert "Comment y arriver" in html
+    assert "Ce que ça révèle" in html
+    assert "danger-blocks" in html
+    assert "10/10" in html
+
+
+def test_sarif_security_severity_uses_danger():
+    from app import attack
+
+    report = sample_report()
+    attack.annotate(report["findings"], "https://cible.test")
+    sarif = reporting.to_sarif(report)
+    rule = next(r for r in sarif["runs"][0]["tool"]["driver"]["rules"] if r["id"] == "exposure.git")
+    assert rule["properties"]["danger"] == 10
+    assert rule["properties"]["security-severity"] == "10.0"
+
+
+def test_markdown_includes_situation():
+    from app import attack
+
+    report = sample_report()
+    attack.annotate(report["findings"], "https://cible.test")
+    markdown = reporting.to_markdown(report)
+    assert "## Rapport de situation" in markdown
+    assert "danger 10/10" in markdown
+    assert "**Comment y arriver :**" in markdown

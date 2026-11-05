@@ -9,7 +9,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from urllib.parse import urlsplit, urlunsplit
 
-from .. import config, narrative, verify
+from .. import attack, config, narrative, verify
 from ..models import CheckResult, Finding, ScanReport
 from ..safety import ScanError, validate_target
 from . import (
@@ -441,6 +441,13 @@ async def run_scan(
         report.checks = checks
         for finding in report.findings:
             finding.confidence = narrative.confidence_for(finding.id)
+        enriched = attack.annotate([f.to_dict() for f in report.findings], report.final_url or target.url)
+        for finding, data in zip(report.findings, enriched, strict=False):
+            finding.danger = data["danger"]
+            finding.danger_label = data["danger_label"]
+            finding.access = data["access"]
+            finding.reveals = data["reveals"]
+            finding.skill = data["skill"]
         report.duration_ms = int((time.perf_counter() - started) * 1000)
         report.executive = narrative.build(report.to_dict())
 

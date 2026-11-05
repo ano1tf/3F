@@ -11,10 +11,16 @@ virtualConsole.on("jsdomError", (e) => errors.push(`jsdomError: ${e.message}`));
 const findings = [
   { id: "exposure.git", title: "Dépôt Git exposé", severity: "critical", severity_label: "Critique",
     category: "Exposition de fichiers", description: "Dépôt public.", evidence: "GET /.git/HEAD → 200",
-    remediation: "Bloquez .git/", reference: "https://owasp.org", confidence: "certain" },
+    remediation: "Bloquez .git/", reference: "https://owasp.org", confidence: "certain",
+    danger: 10, danger_label: "Critique — exploitable immédiatement, impact majeur",
+    access: ["Ouvrir https://cible.test/.git/HEAD sans authentification.", "Le serveur renvoie la branche courante."],
+    reveals: "Le code source complet et les secrets de l'historique.", skill: "faible" },
   { id: "content.comments-leak", title: "Commentaire sensible", severity: "low", severity_label: "Faible",
     category: "Fuite d'information", description: "Mot de passe en commentaire.", evidence: "<!-- pwd -->",
-    remediation: "Nettoyez le HTML.", reference: "", confidence: "a-confirmer" },
+    remediation: "Nettoyez le HTML.", reference: "", confidence: "a-confirmer",
+    danger: 2, danger_label: "Faible — signal de durcissement",
+    access: ["Lire le code source de la page.", "Repérer le commentaire."],
+    reveals: "Une information interne résiduelle.", skill: "aucune" },
 ];
 
 const report = {
@@ -36,6 +42,7 @@ const report = {
     key_risks: [{ id: "exposure.git", title: "Dépôt Git exposé", severity: "critical", severity_label: "Critique",
                   impact: "Le code source fuit.", action: "Bloquez .git/" }],
     strengths: ["HTTPS actif", "SPF publié"],
+    danger_max: 10,
     radar: [{ label: "Exposition de fichiers", value: 100 }, { label: "Fuite d'information", value: 5 },
             { label: "Configuration HTTP", value: 0 }],
   },
@@ -121,11 +128,20 @@ setTimeout(() => {
   check("pages listées", document.querySelectorAll("#pages-list li").length === 2);
   check("tiers listés", document.querySelectorAll("#third-list li").length === 2);
 
+  // rapport de situation
+  check("panneau situation visible", document.querySelector("#situation-panel").hidden === false);
+  check("5 cartes max", document.querySelectorAll("#situation-list .situation-card").length === 2);
+  check("danger affiché en carte", document.querySelectorAll("#situation-list .danger b")[0].textContent === "10/10");
+  check("étapes en carte", document.querySelectorAll("#situation-list ol.access li").length >= 2);
+  check("chip danger dans le constat", [...document.querySelectorAll(".danger-chip")].some((c) => !c.hidden && c.textContent.includes("10/10")));
+  check("onglet situation compté", document.querySelector("#tab-count-situation").textContent === "2");
+
   // onglets
   const constatsTab = document.querySelector('.tab[data-tab="constats"]');
   constatsTab.click();
   check("onglet constats actif", constatsTab.classList.contains("is-active"));
   check("groupe constats visible", !document.querySelector('.tab-group[data-tab="constats"]').classList.contains("is-hidden"));
+  check("situation masquée hors onglet", document.querySelector('#situation-panel').classList.contains("is-hidden"));
   check("synthèse masquée", document.querySelector('#priority-panel').classList.contains("is-hidden"));
   check("onglet lui-même visible", !constatsTab.classList.contains("is-hidden"));
 

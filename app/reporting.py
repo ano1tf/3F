@@ -7,7 +7,7 @@ import json
 from datetime import datetime
 from typing import Any
 
-from . import config, remediation
+from . import attack, config, remediation
 from .models import SEVERITY_LABELS_FR, Severity
 
 SARIF_LEVEL = {
@@ -67,7 +67,13 @@ def to_sarif(report: dict[str, Any]) -> dict[str, Any]:
                 "helpUri": finding.get("reference") or "",
                 "defaultConfiguration": {"level": SARIF_LEVEL.get(finding["severity"], "note")},
                 "properties": {
-                    "security-severity": SARIF_SECURITY_SEVERITY.get(finding["severity"], "0.0"),
+                    "security-severity": (
+                        f"{float(finding['danger']):.1f}"
+                        if finding.get("danger")
+                        else SARIF_SECURITY_SEVERITY.get(finding["severity"], "0.0")
+                    ),
+                    "danger": finding.get("danger"),
+                    "danger-label": finding.get("danger_label", ""),
                     "tags": ["security", finding.get("category", "web")],
                 },
             }
@@ -94,6 +100,8 @@ def to_sarif(report: dict[str, Any]) -> dict[str, Any]:
                 ],
                 "properties": {
                     "severity": finding["severity"],
+                    "danger": finding.get("danger"),
+                    "danger-label": finding.get("danger_label", ""),
                     "category": finding.get("category", ""),
                     "evidence": finding.get("evidence", ""),
                     "remediation": finding.get("remediation", ""),
@@ -209,6 +217,18 @@ def to_markdown(report: dict[str, Any]) -> str:
         lines += [f"- `{page.get('status')}` {page.get('url')}" for page in pages]
         lines.append("")
 
+    situation = attack.situation_table(report.get("findings") or [], limit=5)
+    if situation:
+        lines += ["## Rapport de situation", ""]
+        for index, item in enumerate(situation, start=1):
+            lines.append(f"### {index}. {item['title']} — danger {item['danger']}/10 ({item['severity_label']})")
+            lines.append("**Comment y arriver :**")
+            lines += [f"{step_index}. {step}" for step_index, step in enumerate(item["access"], start=1)]
+            lines.append("")
+            lines.append(f"**Ce que ça révèle :** {item['reveals']}")
+            lines.append(f"**Correction :** {item['remediation']}")
+            lines.append("")
+
     findings = report.get("findings") or []
     if not findings:
         lines.append("Aucun problème détecté par les contrôles passifs. 🎉")
@@ -220,6 +240,15 @@ def to_markdown(report: dict[str, Any]) -> str:
             finding.get("description", ""),
             "",
         ]
+        if finding.get("access"):
+            lines.append(
+                f"**Comment y arriver** (danger {finding.get('danger', '?')}/10, "
+                f"{finding.get('danger_label', '')}) :"
+            )
+            lines += [f"{idx}. {step}" for idx, step in enumerate(finding["access"], start=1)]
+            lines.append("")
+        if finding.get("reveals"):
+            lines += [f"**Ce que ça révèle :** {finding['reveals']}", ""]
         if finding.get("evidence"):
             lines += ["```", finding["evidence"], "```", ""]
         if finding.get("remediation"):
@@ -265,6 +294,17 @@ def _radar_svg(radar: list[dict[str, Any]], size: int = 260) -> str:
         f"{rings}{''.join(spokes)}"
         f'<polygon points="{" ".join(points)}" fill="rgba(194,34,58,.16)" stroke="#c0223a" stroke-width="1.8"/>'
         f"{''.join(labels)}</svg>"
+    )
+
+
+def _danger_meter(value: int, label: str = "") -> str:
+    value = max(0, min(10, int(value or 0)))
+    blocks = "".join(
+        f'<span class="{"on" if index < value else "off"}"></span>' for index in range(10)
+    )
+    return (
+        f'<div class="danger" title="{_e(label)}"><div class="danger-blocks">{blocks}</div>'
+        f'<b>{value}/10</b><em>{_e(label)}</em></div>'
     )
 
 
@@ -330,6 +370,9 @@ def to_html(report: dict[str, Any]) -> str:
             {f'<span class="conf">{_e("à vérifier" if finding.get("confidence") == "probable" else "à confirmer")}</span>' if finding.get("confidence") not in (None, "certain") else ""}
           </header>
           <p class="desc">{_e(finding.get("description", ""))}</p>
+          {f'''<div class="find-danger">{_danger_meter(finding.get("danger", 0), finding.get("danger_label", ""))}</div>
+          <div class="block"><h4>Comment y arriver</h4><ol class="sit-steps">{"".join(f"<li>{_e(step)}</li>" for step in finding.get("access") or [])}</ol></div>
+          <div class="block"><h4>Ce que ça révèle</h4><p class="sit-reveals">{_e(finding.get("reveals", ""))}</p></div>''' if finding.get("danger") else ""}
           <div class="block"><h4>Preuve</h4><pre>{_e(finding.get("evidence") or "—")}</pre></div>
           <div class="block fix"><h4>Remédiation</h4><p>{_e(finding.get("remediation") or "—")}</p></div>
           {f'<a class="ref" href="{_e(reference)}">Documentation ↗</a>' if reference else ''}
@@ -429,6 +472,28 @@ def to_html(report: dict[str, Any]) -> str:
     <div class="exec-radar">{radar_svg}<p class="muted">Exposition relative par catégorie</p></div>
   </div>'''
 
+    situation_items = attack.situation_table(findings, limit=5)
+    situation_html = ""
+    if situation_items:
+        cards = []
+        for item in situation_items:
+            steps = "".join(f"<li>{_e(step)}</li>" for step in item["access"])
+            cards.append(
+                f'''<article class="situation-card">
+          <header><h3>{_e(item["title"])}</h3>{_danger_meter(item["danger"], item["danger_label"])}</header>
+          <p class="sit-cat">{_e(item["category"])} · {_e(item["severity_label"])} · compétence {_e(item["skill"])}</p>
+          <h4>Comment y arriver</h4><ol class="sit-steps">{steps}</ol>
+          <h4>Ce que ça révèle</h4><p class="sit-reveals">{_e(item["reveals"])}</p>
+          <p class="sit-fix"><strong>Correction :</strong> {_e(item["remediation"])}</p>
+        </article>'''
+            )
+        situation_html = (
+            "<h2>Rapport de situation</h2>"
+            '<p class="sit-intro">Les cinq failles les plus dangereuses : comment y arriver, '
+            "ce qu'elles révèlent, et une cotation de 1 à 10.</p>"
+            f'<div class="situation-grid">{"".join(cards)}</div>'
+        )
+
     third_html = ""
     if report.get("third_parties"):
         rows = "".join(
@@ -524,6 +589,27 @@ def to_html(report: dict[str, Any]) -> str:
   ul.pages .code {{ font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11px; color:#1b8a5a; }}
   ul.pages em {{ margin-left:auto; color:var(--muted); font-style:normal; font-size:11.5px; }}
   .muted {{ color:var(--muted); font-size:12.5px; }}
+  .sit-intro {{ margin:-4px 0 14px; color:var(--muted); font-size:13px; }}
+  .situation-grid {{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }}
+  .situation-card {{ background:#fff; border:1px solid var(--line); border-radius:12px;
+                     padding:14px 16px; break-inside:avoid; }}
+  .situation-card header {{ display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }}
+  .situation-card h3 {{ margin:0; font-size:14px; flex:1; }}
+  .situation-card h4 {{ margin:12px 0 4px; }}
+  .sit-cat {{ margin:6px 0 0; color:var(--muted); font-size:11.5px; }}
+  .sit-steps {{ margin:0; padding-left:18px; font-size:12.5px; color:#334155; }}
+  .sit-steps li {{ margin:4px 0; }}
+  .sit-reveals {{ margin:0; font-size:12.5px; color:#334155; }}
+  .sit-fix {{ margin:8px 0 0; font-size:12px; color:#14532d; }}
+  .find-danger {{ margin:12px 0 0; }}
+  .danger {{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:11px; color:var(--muted); }}
+  .danger-blocks {{ display:flex; gap:2px; }}
+  .danger-blocks span {{ width:8px; height:14px; border-radius:2px; background:#e6ebf2; }}
+  .danger-blocks span.on {{ background:#c0223a; }}
+  .danger-blocks span.on:nth-child(n+9) {{ background:#8f0f22; }}
+  .danger b {{ font-size:12px; color:#12181f; }}
+  .danger em {{ font-style:normal; color:var(--muted); }}
+  @media (max-width: 760px) {{ .situation-grid {{ grid-template-columns:1fr; }} }}
   .exec {{ display:grid; grid-template-columns:1.6fr 1fr; gap:22px; align-items:start; }}
   .exec-headline {{ font-size:15px; font-weight:700; margin:10px 0 6px; }}
   .exec-paragraph {{ margin:0 0 14px; color:#334155; font-size:13.5px; }}
@@ -603,6 +689,7 @@ def to_html(report: dict[str, Any]) -> str:
   {f'<h2>À corriger en priorité</h2><div class="panel"><ol class="priority">{priority_html}</ol></div>' if priority_html else ""}
 
   {executive_html}
+{situation_html}
 {plan_html}
 {diff_html}
 {pages_html}

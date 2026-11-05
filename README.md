@@ -8,7 +8,7 @@ Aucune exploitation, aucune injection, aucun contournement d'authentification : 
 visiteur peut observer.
 
 ```
-┌ VulnLens v5.0 ─────────────────────────────────────────────────────────────┐
+┌ VulnLens v6.0 ─────────────────────────────────────────────────────────────┐
 │  Risque critique · score 8/100     3 pages · 11 familles de contrôles      │
 ├────────────────────────────────────────────────────────────────────────────┤
 │  « Des accès ou des données sont exposés : à traiter immédiatement. »      │
@@ -18,6 +18,15 @@ visiteur peut observer.
 ```
 
 ---
+
+## Ce que fait la v6
+
+| Capacité | Détail |
+|---|---|
+| **Rapport de situation** | Pour chaque faille : **comment y arriver** (chemin d'accès en étapes, sans charge exploitable), **ce qu'elle révèle** (impact concret), et une **cotation de dangerosité de 1 à 10** — visible dans l'interface, le HTML, le Markdown et SARIF. |
+| **Échelle de danger** | 1-2 signal de durcissement · 3-4 utile en combinaison · 5-6 scénario réaliste · 7-8 exploitable à distance sans effort · 9-10 accès immédiat. La note tient compte de la sévérité, de l'exposition réelle et du niveau de certitude. |
+| **Niveau de compétence** | Chaque scénario indique s'il faut « aucune compétence », une compétence faible ou intermédiaire — utile pour arbitrer entre urgence et effort. |
+| **Exports enrichis** | SARIF expose `danger` et aligne `security-severity` sur la note /10 ; le HTML ajoute un « Rapport de situation » en tête avec les cinq failles les plus dangereuses. |
 
 ## Ce que fait la v5
 
@@ -132,7 +141,8 @@ Le jeton est généré par `GET /api/verify/{hôte}`, la vérification se lance 
 - **Markdown** : PR, wiki, ticket.
 - **JSON** : tout le rapport, y compris `pages`, `verified`, `score_breakdown`, `fingerprint`.
 
-Contenu du HTML : bandeau de score, **plan d'action en trois vagues**, **évolution vs analyse
+Contenu du HTML : bandeau de score, **synthèse exécutive avec radar**, **rapport de situation**
+(chemin d'accès, révélation, danger /10), **plan d'action en trois vagues**, **évolution vs analyse
 précédente**, **dépendances tierces**, constats détaillés (preuve + remédiation + référence),
 empreinte technique, **pages analysées**, contrôles exécutés avec leur durée.
 
@@ -200,6 +210,7 @@ app/
 ├─ diffing.py         comparaison de deux rapports
 ├─ remediation.py     plan d'action (effort, priorité, gain de score)
 ├─ narrative.py       synthèse exécutive, niveau de risque, radar, confiance
+├─ attack.py          rapport de situation : chemin d'accès, révélation, danger 1-10
 ├─ watch.py           surveillance planifiée (échéances, réanalyse, alertes)
 ├─ alerts.py          webhook best-effort
 ├─ db.py              SQLite, migrations, stats, analyse précédente
@@ -232,7 +243,7 @@ liste des pages concernées, pour éviter les rapports de 300 lignes répétitiv
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest        # 205 tests
+.venv/bin/python -m pytest        # 217 tests
 .venv/bin/ruff check .
 
 # interface : rendu simulé (jsdom), aucune erreur JavaScript tolérée
@@ -254,6 +265,7 @@ jsdom. Fixture serveur volontairement vulnérable : 3 pages, clé AWS factice, s
 - [x] Plan d'action priorisé (quick / sprint / projet)
 - [x] Synthèse exécutive et radar de risque
 - [x] Surveillance planifiée avec alertes de régression
+- [x] Rapport de situation avec cotation de dangerosité 1-10
 - [x] Chasse aux secrets dans les bundles publics
 - [x] Cartographie des dépendances tierces
 - [ ] Rapport hebdomadaire par e-mail (digest de la surveillance)

@@ -45,6 +45,11 @@ class Finding:
     remediation: str = ""
     reference: str = ""
     confidence: str = "certain"  # certain | probable | a-confirmer
+    danger: int = 0  # 1-10, calculé par app.attack
+    danger_label: str = ""
+    access: list[str] = field(default_factory=list)
+    reveals: str = ""
+    skill: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -58,6 +63,11 @@ class Finding:
             "remediation": self.remediation,
             "reference": self.reference,
             "confidence": self.confidence,
+            "danger": self.danger,
+            "danger_label": self.danger_label,
+            "access": self.access,
+            "reveals": self.reveals,
+            "skill": self.skill,
         }
 
 
