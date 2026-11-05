@@ -233,6 +233,34 @@ def check_headers(response: HttpResponse, is_https: bool) -> list[Finding]:
                 reference="https://owasp.org/www-project-top-ten/2017/A6_2017-Security_Misconfiguration",
             )
         )
+
+    # En-têtes de débogage : présents quand le profiler de développement tourne en production.
+    debug_headers = [
+        f"{name}: {present[name]}"
+        for name in ("x-debug-token", "x-debug-token-link", "x-symfony-cache", "x-php-debug")
+        if present.get(name)
+    ]
+    if debug_headers:
+        findings.append(
+            Finding(
+                id="headers.debug-token",
+                title="En-têtes de débogage exposés",
+                severity=Severity.HIGH,
+                category=CATEGORY,
+                description=(
+                    "Le serveur annonce un jeton de profiler : l'interface de débogage du "
+                    "framework est active. Elle expose les requêtes SQL, les variables "
+                    "d'environnement, les sessions et les e-mails envoyés — une fuite interne "
+                    "complète, sans authentification."
+                ),
+                evidence="\n".join(debug_headers[:4]),
+                remediation=(
+                    "Désactivez le mode debug et le profiler en production (`APP_ENV=prod`, "
+                    "`APP_DEBUG=false`), puis redémarrez l'application."
+                ),
+                reference="https://symfony.com/doc/current/profiler.html",
+            )
+        )
     return findings
 
 

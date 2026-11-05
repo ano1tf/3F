@@ -35,13 +35,21 @@ def test_full_scan_detects_expected_issues(vulnerable_server):
     assert "headers.csp-wildcard" in ids
     assert "cookies.prefix-violation" in ids
     assert "exposure.directory-listing" in ids
+    # Nouveaux contrôles : état Terraform, clé SSH, profiler, bibliothèque obsolète.
+    assert "exposure.terraform-state" in ids
+    assert "exposure.ssh-private-key" in ids
+    assert "headers.debug-token" in ids
+    assert "libs.jquery" in ids
 
     assert report.score < 60
     assert report.grade in {"D", "E", "F"}
     assert report.counts["critical"] >= 2
     assert report.duration_ms > 0
     assert report.scan_id
-    assert report.score_breakdown and sum(report.score_breakdown.values()) == 100 - report.score
+    # Le score est borné à 0 : la somme des pénalités peut dépasser 100.
+    penalty = sum(report.score_breakdown.values())
+    assert report.score_breakdown
+    assert report.score == max(0, min(100, 100 - penalty))
     assert 1 <= len(report.priorities) <= 3
 
     kinds = [event["type"] for event in events]
@@ -156,3 +164,32 @@ def test_findings_carry_situation_and_danger(vulnerable_server):
     assert critical["danger_label"]
     assert payload["executive"]["danger_max"] >= 9
     assert all(finding.get("danger") for finding in payload["findings"])
+
+
+def test_vulnerable_library_carries_version_and_reference(vulnerable_server):
+    async def emit(_payload: dict) -> None:
+        return None
+
+    report = asyncio.run(run_scan(vulnerable_server.url, emit, profile="standard"))
+    finding = next(f for f in report.findings if f.id == "libs.jquery")
+
+    assert "3.4.1" in finding.title
+    assert "3.5.0" in finding.evidence
+    assert finding.reference.startswith("https://")
+    assert finding.danger >= 7
+    assert finding.access and finding.reveals
+    # La bibliothèque est aussi visible dans l'empreinte technique.
+    assert "jQuery" in report.fingerprint.get("bibliotheques", "")
+
+
+def test_new_checks_are_reported_in_check_list(vulnerable_server):
+    async def emit(_payload: dict) -> None:
+        return None
+
+    report = asyncio.run(run_scan(vulnerable_server.url, emit, profile="standard"))
+    keys = {check.key: check for check in report.checks}
+
+    assert "libs" in keys
+    assert keys["libs"].status == "ok"
+    assert keys["libs"].findings
+    assert "exposure" in keys and keys["exposure"].status == "ok"

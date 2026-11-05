@@ -39,6 +39,169 @@ def _steps(*items: str) -> list[str]:
 # dangerosité par rapport à la sévérité de base et le niveau de compétence nécessaire.
 FAMILIES: tuple[tuple[str, dict[str, Any]], ...] = (
     (
+        "libs.",
+        {
+            "steps": _steps(
+                "Lire le nom des fichiers JavaScript servis par le site : la version y figure "
+                "souvent en clair (`jquery-1.12.4.min.js`).",
+                "Comparer cette version aux avis publics : la faille est déjà documentée, avec "
+                "son numéro CVE et souvent une preuve de concept publiée.",
+                "Injecter un contenu piégé dans une zone que cette bibliothèque traite (commentaire, "
+                "nom de profil, paramètre d'URL) pour exécuter du script chez les visiteurs.",
+            ),
+            "reveals": "Une bibliothèque obsolète, donc une vulnérabilité publique applicable "
+            "sans recherche : XSS stocké, pollution de prototype ou exécution de code selon la "
+            "bibliothèque. Le navigateur des visiteurs authentifiés devient le point d'entrée.",
+            "modifier": 1,
+            "skill": "faible",
+        },
+    ),
+    (
+        "secrets.jwt-alg-none",
+        {
+            "steps": _steps(
+                "Récupérer le jeton trouvé dans un fichier public (la preuve le masque).",
+                "Décoder son en-tête : il annonce `alg: none`, donc aucune signature.",
+                "Réécrire les revendications (`sub`, `role`, `exp`) et présenter le jeton au "
+                "serveur : s'il accepte cet algorithme, la session est ouverte sans mot de passe.",
+            ),
+            "reveals": "Un contournement complet de l'authentification : n'importe quel rôle "
+            "peut être endossé, y compris administrateur.",
+            "modifier": 1,
+            "skill": "aucune",
+        },
+    ),
+    (
+        "secrets.jwt-privileged",
+        {
+            "steps": _steps(
+                "Extraire le jeton depuis les fichiers publics du site.",
+                "Lire ses revendications : le rôle annoncé est administratif.",
+                "Le rejouer tant qu'il est valide, ou s'en inspirer pour forger un jeton si la "
+                "signature est mal vérifiée.",
+            ),
+            "reveals": "Un accès privilégié direct, ou le format exact des revendications à "
+            "reproduire pour élever ses droits.",
+            "modifier": 1,
+            "skill": "faible",
+        },
+    ),
+    (
+        "headers.debug-token",
+        {
+            "steps": _steps(
+                "Lire l'en-tête de réponse `X-Debug-Token` : il identifie une requête dans le "
+                "profiler du framework.",
+                "Ouvrir `/_profiler/<jeton>` : requêtes SQL, variables d'environnement, sessions "
+                "et e-mails envoyés sont affichés sans authentification.",
+                "Réutiliser les secrets trouvés (identifiants de base, jetons) pour aller plus loin.",
+            ),
+            "reveals": "L'intérieur de l'application : requêtes SQL, configuration, sessions "
+            "d'utilisateurs et parfois secrets d'API.",
+            "modifier": 1,
+            "skill": "aucune",
+        },
+    ),
+    (
+        "exposure.terraform-state",
+        {
+            "steps": _steps(
+                "Télécharger `{target}/terraform.tfstate` : le fichier est servi statiquement.",
+                "Y lire l'inventaire d'infrastructure et les valeurs sensibles (mots de passe, "
+                "clés d'accès) que Terraform y stocke en clair.",
+                "Utiliser ces identifiants contre les services cloud ou les bases concernés.",
+            ),
+            "reveals": "La carte complète de l'infrastructure et ses secrets : c'est la prise "
+            "de contrôle du cloud, pas seulement du site.",
+            "modifier": 1,
+            "skill": "aucune",
+        },
+    ),
+    (
+        "exposure.actuator-heapdump",
+        {
+            "steps": _steps(
+                "Demander `{target}/actuator/heapdump` : un dump mémoire complet est renvoyé.",
+                "L'analyser avec un outil Java pour extraire chaînes, mots de passe, clés et "
+                "jetons de session encore en mémoire.",
+                "Rejouer les sessions ou les identifiants extraits.",
+            ),
+            "reveals": "La mémoire vive du serveur applicatif : secrets de configuration, "
+            "sessions actives et données personnelles.",
+            "modifier": 1,
+            "skill": "faible",
+        },
+    ),
+    (
+        "exposure.symfony-profiler",
+        {
+            "steps": _steps(
+                "Ouvrir `{target}/_profiler` : l'interface de débogage s'affiche sans authentification.",
+                "Parcourir les dernières requêtes : SQL, variables d'environnement, sessions.",
+                "Réutiliser les secrets et les sessions trouvés.",
+            ),
+            "reveals": "Une console de débogage complète en production : structure interne, "
+            "requêtes SQL et données de session.",
+            "modifier": 1,
+            "skill": "aucune",
+        },
+    ),
+    (
+        "exposure.ssh-private-key",
+        {
+            "steps": _steps(
+                "Télécharger la clé privée exposée (`{target}/.ssh/id_rsa`).",
+                "La présenter aux serveurs qui font confiance à la clé publique correspondante.",
+                "Se connecter en SSH avec les droits du compte associé.",
+            ),
+            "reveals": "Un accès serveur direct, hors application, avec les droits du compte "
+            "propriétaire de la clé.",
+            "modifier": 1,
+            "skill": "faible",
+        },
+    ),
+    (
+        "exposure.gcp-service-account",
+        {
+            "steps": _steps(
+                "Télécharger le fichier d'identifiants de compte de service.",
+                "S'authentifier auprès des API Google Cloud avec ce fichier.",
+                "Lister et lire les ressources accessibles (stockage, base, facturation).",
+            ),
+            "reveals": "Les droits du compte de service sur l'infrastructure cloud : lecture et "
+            "souvent écriture des données.",
+            "modifier": 1,
+            "skill": "faible",
+        },
+    ),
+    (
+        "exposure.database-config",
+        {
+            "steps": _steps(
+                "Télécharger le fichier de configuration (`{target}/config/database.yml`).",
+                "Y lire l'hôte, l'utilisateur et le mot de passe de la base.",
+                "Se connecter directement à la base si elle est joignable depuis l'extérieur.",
+            ),
+            "reveals": "Un accès direct aux données, sans passer par l'application ni ses "
+            "contrôles d'accès.",
+            "modifier": 1,
+            "skill": "faible",
+        },
+    ),
+    (
+        "exposure.htpasswd",
+        {
+            "steps": _steps(
+                "Télécharger le fichier `.htpasswd` servi par erreur.",
+                "Extraire les empreintes de mots de passe des comptes listés.",
+                "Les casser hors ligne (ces empreintes sont souvent faibles) et se connecter.",
+            ),
+            "reveals": "Les identifiants des comptes protégés par l'authentification HTTP.",
+            "modifier": 0,
+            "skill": "faible",
+        },
+    ),
+    (
         "exposure.git",
         {
             "steps": _steps(

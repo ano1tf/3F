@@ -98,7 +98,7 @@ PATTERNS: tuple[SecretPattern, ...] = (
         "secrets.openai",
         "Clé d'API OpenAI exposée",
         Severity.HIGH,
-        re.compile(r"\bsk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{32,}\b"),
+        re.compile(r"\bsk-(?!ant-)(?:proj-|svcacct-)?[A-Za-z0-9_-]{32,}\b"),
         "Une clé d'API de modèle de langage permet de consommer le quota du compte, voire "
         "d'accéder aux données et fine-tunings associés.",
         "Révoquez la clé et proxifiez les appels par votre backend (jamais depuis le navigateur).",
@@ -210,6 +210,148 @@ PATTERNS: tuple[SecretPattern, ...] = (
         "Stripe et peut faciliter des tests frauduleux sur votre environnement.",
         "Utilisez les clés publiques (`pk_`) côté navigateur et gardez `sk_test_` côté serveur.",
     ),
+
+    SecretPattern(
+        "secrets.anthropic",
+        "Clé d'API Anthropic exposée",
+        Severity.HIGH,
+        re.compile(r"\bsk-ant-[A-Za-z0-9_-]{32,}\b"),
+        "Une clé d'API Anthropic permet de consommer le quota du compte et d'accéder aux "
+        "ressources associées (workspaces, fichiers téléversés).",
+        "Révoquez la clé dans la console et proxifiez les appels par votre backend.",
+    ),
+    SecretPattern(
+        "secrets.github-pat",
+        "Jeton GitHub à granularité fine exposé",
+        Severity.CRITICAL,
+        re.compile(r"\bgithub_pat_[A-Za-z0-9_]{50,}\b"),
+        "Un jeton `github_pat_` donne un accès programmatique aux dépôts et à la CI selon ses "
+        "portées : lecture de code privé, écriture, modification des workflows.",
+        "Révoquez le jeton, réduisez ses portées et sa durée de vie, et utilisez OIDC dans la CI.",
+    ),
+    SecretPattern(
+        "secrets.gitlab",
+        "Jeton GitLab exposé",
+        Severity.CRITICAL,
+        re.compile(r"\bglpat-[A-Za-z0-9_-]{20,}\b"),
+        "Un jeton d'accès personnel GitLab permet de lire et modifier les projets, les pipelines "
+        "et parfois les variables CI/CD (qui contiennent d'autres secrets).",
+        "Révoquez le jeton (Preferences → Access Tokens) et privilégiez des jetons de projet "
+        "à durée limitée.",
+    ),
+    SecretPattern(
+        "secrets.huggingface",
+        "Jeton Hugging Face exposé",
+        Severity.HIGH,
+        re.compile(r"\bhf_[A-Za-z0-9]{30,}\b"),
+        "Un jeton Hugging Face donne accès aux modèles et jeux de données privés du compte, et "
+        "permet d'en publier en son nom.",
+        "Révoquez le jeton et faites les appels d'inférence depuis un backend.",
+    ),
+    SecretPattern(
+        "secrets.stripe-webhook",
+        "Secret de webhook Stripe exposé",
+        Severity.HIGH,
+        re.compile(r"\bwhsec_[A-Za-z0-9]{24,}\b"),
+        "Le secret de signature des webhooks Stripe permet de forger des événements valides : "
+        "un attaquant peut simuler un paiement réussi ou un abonnement actif.",
+        "Faites tourner le secret dans le tableau de bord Stripe et vérifiez la signature côté serveur.",
+    ),
+    SecretPattern(
+        "secrets.npm",
+        "Jeton npm exposé",
+        Severity.HIGH,
+        re.compile(r"\bnpm_[A-Za-z0-9]{36}\b"),
+        "Un jeton npm permet de publier des paquets au nom de l'organisation : c'est un vecteur "
+        "de chaîne d'approvisionnement (code exécuté chez vos utilisateurs).",
+        "Révoquez le jeton, activez le 2FA sur la publication et utilisez des jetons de CI à "
+        "portée limitée.",
+    ),
+    SecretPattern(
+        "secrets.pypi",
+        "Jeton PyPI exposé",
+        Severity.HIGH,
+        re.compile(r"\bpypi-AgEIcHlwaS5vcmc[A-Za-z0-9_-]{40,}\b"),
+        "Un jeton PyPI permet de publier des paquets au nom du projet : un tiers peut diffuser "
+        "une version malveillante.",
+        "Révoquez le jeton et restreignez-le au projet concerné (jeton à portée de projet).",
+    ),
+    SecretPattern(
+        "secrets.digitalocean",
+        "Jeton DigitalOcean exposé",
+        Severity.HIGH,
+        re.compile(r"\bdop_v1_[a-f0-9]{64}\b"),
+        "Un jeton DigitalOcean permet de créer, modifier ou détruire des ressources (droplets, "
+        "bases, volumes) facturées au compte.",
+        "Révoquez le jeton et restreignez les portées (read-only, IP autorisées).",
+    ),
+    SecretPattern(
+        "secrets.twilio",
+        "Clé d'API Twilio exposée",
+        Severity.HIGH,
+        re.compile(r"\bSK[a-f0-9]{32}\b"),
+        "Une clé Twilio permet d'envoyer des SMS et des appels, avec facturation au compte et "
+        "risque d'usurpation du numéro.",
+        "Révoquez la clé dans la console Twilio et restreignez-la à un usage serveur.",
+    ),
+    SecretPattern(
+        "secrets.shopify",
+        "Jeton d'accès Shopify exposé",
+        Severity.CRITICAL,
+        re.compile(r"\bshp(?:at|ca|pa)_[a-fA-F0-9]{32}\b"),
+        "Un jeton d'accès d'application Shopify donne la main sur la boutique : commandes, "
+        "clients, produits et configuration de paiement.",
+        "Révoquez l'application dans l'admin Shopify et régénérez le jeton.",
+    ),
+    SecretPattern(
+        "secrets.google-oauth",
+        "Secret client OAuth Google exposé",
+        Severity.HIGH,
+        re.compile(r"\bGOCSPX-[A-Za-z0-9_-]{28}\b"),
+        "Le secret client OAuth permet d'usurper l'application auprès de Google et de détourner "
+        "le flux d'autorisation (hameçonnage crédible).",
+        "Régénérez le secret dans la console Google Cloud et gardez-le côté serveur uniquement.",
+    ),
+    SecretPattern(
+        "secrets.discord-webhook",
+        "Webhook Discord exposé",
+        Severity.HIGH,
+        re.compile(r"https://(?:ptb\.|canary\.)?discord(?:app)?\.com/api/webhooks/\d{10,}/[A-Za-z0-9_-]{30,}"),
+        "L'URL d'un webhook Discord permet à n'importe qui de publier ou de supprimer des "
+        "messages dans le salon cible (désinformation, spam, fuite d'alertes).",
+        "Supprimez le webhook dans les paramètres du salon et régénérez-le, côté serveur.",
+    ),
+    SecretPattern(
+        "secrets.slack-webhook",
+        "Webhook Slack exposé",
+        Severity.HIGH,
+        re.compile(r"https://hooks\.slack\.com/services/T[A-Za-z0-9_]{6,}/B[A-Za-z0-9_]{6,}/[A-Za-z0-9_]{20,}"),
+        "L'URL d'un webhook Slack permet de publier des messages dans le canal : hameçonnage "
+        "interne, diffusion de fausses alertes ou de liens malveillants.",
+        "Révoquez le webhook (Apps → Incoming Webhooks) et gardez l'URL côté serveur.",
+    ),
+    SecretPattern(
+        "secrets.airtable",
+        "Jeton Airtable exposé",
+        Severity.HIGH,
+        re.compile(r"\bpat[A-Za-z0-9]{14}\.[a-f0-9]{64}\b"),
+        "Un jeton Airtable donne accès aux bases du compte selon ses portées : lecture ou "
+        "modification de données métier.",
+        "Révoquez le jeton dans les paramètres du compte et restreignez ses portées.",
+    ),
+    SecretPattern(
+        "secrets.database-url",
+        "URL de connexion à une base avec identifiants",
+        Severity.CRITICAL,
+        re.compile(
+            r"\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|amqp)://"
+            r"[^\s:@/'\"<>]+:[^\s:@/'\"<>]{4,}@[^\s'\"<>]+"
+        ),
+        "Une chaîne de connexion complète (hôte, utilisateur, mot de passe) est exposée dans un "
+        "fichier public : la base est accessible directement, sans passer par l'application.",
+        "Changez le mot de passe, révoquez l'accès réseau public à la base et gardez la chaîne "
+        "de connexion dans un coffre côté serveur.",
+    ),
 )
 
 PLACEHOLDERS = (
@@ -262,6 +404,120 @@ def find_secrets(text: str) -> list[tuple[SecretPattern, int, str]]:
             if len(hits) > 200:  # garde-fou sur les bundles obèses
                 return hits
     return hits
+
+
+# --------------------------------------------------------------------------- #
+# Analyse des JWT trouvés : un jeton présent n'est pas toujours grave, un jeton
+# non signé ou porteur de privilèges l'est.
+# --------------------------------------------------------------------------- #
+
+# La signature peut être vide : c'est justement le cas `alg: none` qu'on recherche.
+_JWT_TOKEN = re.compile(r"\b(eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]*)?)")
+_PRIVILEGED_CLAIM = re.compile(
+    r'"(?:role|roles|scope|scopes|group|groups|permissions?|authorities)"\s*:\s*'
+    r'\[[^\]]{0,120}?|"[^"]{0,40}?\b(?:admin|root|superuser|super_admin|owner|sysadmin)\b',
+    re.IGNORECASE,
+)
+_ADMIN_FLAG = re.compile(r'"(?:is_?admin|admin|superuser|is_staff)"\s*:\s*true', re.IGNORECASE)
+
+
+def _b64url_json(chunk: str) -> dict | None:
+    import base64
+    import json
+
+    try:
+        padded = chunk + "=" * (-len(chunk) % 4)
+        raw = base64.urlsafe_b64decode(padded.encode("ascii"))
+        value = json.loads(raw.decode("utf-8", errors="replace"))
+    except Exception:  # noqa: BLE001 - un faux positif de regex n'est pas une erreur
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def jwt_findings(texts: list[tuple[str, str]]) -> list[Finding]:
+    """Analyse les JWT publics : signature absente ou privilèges en clair."""
+    import json
+
+    weak: list[str] = []
+    privileged: list[str] = []
+    seen: set[str] = set()
+
+    for source, text in texts:
+        for match in _JWT_TOKEN.finditer(text or ""):
+            token = match.group(1)
+            if token in seen:
+                continue
+            seen.add(token)
+            header_chunk, payload_chunk = token.split(".")[:2]
+            header = _b64url_json(header_chunk)
+            if header is None:
+                continue
+            payload = _b64url_json(payload_chunk) or {}
+            alg = str(header.get("alg", "")).strip()
+            claims = json.dumps(payload, ensure_ascii=False)
+            excerpt = ", ".join(
+                f"{key}={payload[key]!r}"
+                for key in ("sub", "role", "scope", "iss", "exp")
+                if key in payload
+            )[:150]
+
+            if alg.lower() in {"none", ""}:
+                weak.append(f"  · {_short(source)} → alg: {alg or 'absent'} · {excerpt}")
+                continue
+            if _ADMIN_FLAG.search(claims) or _PRIVILEGED_CLAIM.search(claims):
+                privileged.append(f"  · {_short(source)} → alg: {alg} · {excerpt}")
+
+    findings: list[Finding] = []
+    if weak:
+        findings.append(
+            Finding(
+                id="secrets.jwt-alg-none",
+                title="JWT sans signature (`alg: none`) exposé",
+                severity=Severity.CRITICAL,
+                category=CATEGORY,
+                description=(
+                    "Un jeton JWT déclare `alg: none` : il n'est pas signé. Quiconque le trouve "
+                    "peut modifier librement ses revendications (identité, rôle, expiration) et "
+                    "le présenter au serveur. Si celui-ci accepte cet algorithme, "
+                    "l'authentification est contournable sans aucun secret."
+                ),
+                evidence=(
+                    f"{len(weak)} jeton(s) non signé(s) :\n" + "\n".join(weak[:5])
+                    + "\nJeton volontairement masqué : la preuve suffit."
+                ),
+                remediation=(
+                    "Refusez explicitement `alg: none` à la vérification (liste blanche "
+                    "d'algorithmes, jamais de valeur fournie par le jeton) et ne générez jamais "
+                    "de jeton non signé en production."
+                ),
+                reference="https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/06-Session_Management_Testing/10-Testing_JSON_Web_Tokens",
+            )
+        )
+    if privileged:
+        findings.append(
+            Finding(
+                id="secrets.jwt-privileged",
+                title="JWT porteur de privilèges exposé en clair",
+                severity=Severity.HIGH,
+                category=CATEGORY,
+                description=(
+                    "Un jeton présent dans un fichier public contient des revendications "
+                    "administratives (`role: admin`, `is_admin: true`…). Si le jeton n'est pas "
+                    "expiré, il ouvre un accès privilégié direct ; s'il est expiré, il révèle "
+                    "le format des revendications à falsifier."
+                ),
+                evidence=(
+                    f"{len(privileged)} jeton(s) privilégié(s) :\n" + "\n".join(privileged[:5])
+                    + "\nJeton volontairement masqué : la preuve suffit."
+                ),
+                remediation=(
+                    "Retirez tout jeton des fichiers statiques, faites-le expirer, et vérifiez "
+                    "que le serveur contrôle la signature ET les autorisations côté serveur."
+                ),
+                reference="https://cheatsheetseries.owasp.org/cheatsheets/JSON_Web_Token_for_Java_Cheat_Sheet.html",
+            )
+        )
+    return findings
 
 
 def inline_scripts(html: str) -> str:
@@ -339,6 +595,7 @@ async def scan_scripts(
     *,
     inline_html: str = "",
     limit: int = 6,
+    collected: list[tuple[str, str]] | None = None,
 ) -> tuple[list[Finding], dict[str, str]]:
     """Télécharge les scripts publics et cherche des secrets. Retourne (constats, métadonnées)."""
     candidates = script_urls(scripts, page_url)[: max(1, limit)]
@@ -362,6 +619,11 @@ async def scan_scripts(
 
     findings = _aggregate(hits)
     findings.extend(await _source_maps(fetcher, fetched))
+    # Analyse des JWT sur tout ce qui a été lu (inline compris).
+    findings.extend(jwt_findings([(page_url, inline_html)] + fetched))
+    if collected is not None:
+        # Réutilisé par le contrôle « bibliothèques » : aucune requête en double.
+        collected.extend(fetched)
 
     meta: dict[str, str] = {}
     if candidates:

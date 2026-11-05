@@ -251,7 +251,7 @@ async def meta() -> dict:
             {
                 "key": "quick",
                 "label": "Rapide",
-                "detail": "En-têtes, TLS, cookies, CORS, 38 fichiers, contenu, DNS",
+                "detail": "En-têtes, TLS, cookies, CORS, 50 fichiers, contenu, DNS, bibliothèques",
             },
             {
                 "key": "standard",
@@ -279,7 +279,10 @@ async def meta() -> dict:
             "Fuite d'information : versions, traces d'erreur, commentaires HTML",
             "Contenu : contenu mixte, formulaires non chiffrés, SRI, iframes, CSRF, cache",
             "DNS : SPF, DMARC (p/sp), CAA, DKIM, MTA-STS, TLS-RPT",
-            "Secrets : clés cloud/SaaS, clés privées, JWT, identifiants en dur dans les scripts",
+            "Secrets : 33 signatures (cloud, SaaS, CI, paiements, bases) et analyse des JWT",
+            "Bibliothèques front-end : versions à CVE connue (jQuery, Bootstrap, Lodash, AngularJS…)",
+            "Configuration exposée : état Terraform, clés SSH/GCP, heap dump, profiler Symfony",
+            "En-têtes de débogage : profiler de framework actif en production",
             "Surface tierce : domaines chargés, rôles, formulaires qui pointent à l'extérieur",
             "Source maps exposées",
             "Plan d'action : quick/sprint/projet avec gain de score potentiel",

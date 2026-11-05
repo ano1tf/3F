@@ -19,6 +19,7 @@ from . import (
     checks_email,
     checks_exposure,
     checks_http,
+    checks_libs,
     checks_secrets,
     checks_thirdparty,
     checks_tls,
@@ -56,6 +57,7 @@ STEPS = [
     ("content", "Analyse du contenu et des formulaires"),
     ("surface", "Cartographie des dépendances tierces"),
     ("secrets", "Recherche de secrets dans les scripts"),
+    ("libs", "Bibliothèques front-end et versions corrigées"),
     ("deep", "Contrôles approfondis (AXFR, sous-domaines, redirections)"),
     ("score", "Calcul du score et du rapport"),
 ]
@@ -367,6 +369,7 @@ async def run_scan(
             )
 
         await advance("secrets", 88, "Recherche de secrets dans les scripts publics")
+        fetched_scripts: list[tuple[str, str]] = []
         scripts: list[str] = []
         for page in pages:
             scripts.extend(checks_content.parse_page(page.response.text).scripts)
@@ -377,6 +380,7 @@ async def run_scan(
                 scripts,
                 inline_html=response.text,
                 limit=int(selected.get("scripts", 6)),
+                collected=fetched_scripts,
             )
             report.fingerprint.update(secret_meta)
             findings.extend(secret_findings)
@@ -391,6 +395,33 @@ async def run_scan(
         except Exception as exc:  # noqa: BLE001
             checks.append(
                 CheckResult("secrets", "Secrets & scripts", status="error", detail=f"Phase interrompue : {exc}")
+            )
+
+        # ------------------------------------------------------------------
+        # Phase 5 ter — bibliothèques front-end obsolètes (CVE connues)
+        # ------------------------------------------------------------------
+        await advance("libs", 90, "Comparaison des bibliothèques front-end aux versions corrigées")
+        try:
+            lib_findings, lib_meta = checks_libs.detect_libraries(
+                [(page.url, page.response.text) for page in pages],
+                fetched_scripts,
+            )
+            report.fingerprint.update(lib_meta)
+            findings.extend(lib_findings)
+            if lib_findings:
+                detail = f"{len(lib_findings)} bibliothèque(s) obsolète(s)"
+            elif lib_meta.get("bibliotheques"):
+                detail = f"à jour : {lib_meta['bibliotheques']}"
+            else:
+                detail = "aucune bibliothèque versionnée détectée"
+            checks.append(
+                CheckResult("libs", "Bibliothèques front-end", detail=detail, findings=lib_findings)
+            )
+        except Exception as exc:  # noqa: BLE001
+            checks.append(
+                CheckResult(
+                    "libs", "Bibliothèques front-end", status="error", detail=f"Phase interrompue : {exc}"
+                )
             )
 
         headers_map = {k.lower(): v for k, v in response.headers.items()}
@@ -440,7 +471,10 @@ async def run_scan(
         report.counts = count_by_severity(report.findings)
         report.checks = checks
         for finding in report.findings:
-            finding.confidence = narrative.confidence_for(finding.id)
+            # Un contrôle peut déjà avoir qualifié sa certitude (version devinée dans un
+            # bundle) : on ne l'écrase pas par la valeur par défaut.
+            if finding.confidence != "probable":
+                finding.confidence = narrative.confidence_for(finding.id)
         enriched = attack.annotate([f.to_dict() for f in report.findings], report.final_url or target.url)
         for finding, data in zip(report.findings, enriched, strict=False):
             finding.danger = data["danger"]

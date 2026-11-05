@@ -25,6 +25,11 @@ IMPACTS: tuple[tuple[str, str], ...] = (
         "Des accès cloud ou SaaS sont directement utilisables, au nom et aux frais de l'organisation.",
     ),
     (
+        "libs.",
+        "Une bibliothèque obsolète offre un point d'entrée connu (XSS, exécution de code) dans le "
+        "navigateur de vos visiteurs, sans aucune recherche à faire pour l'attaquant.",
+    ),
+    (
         "transport.",
         "Les identifiants, cookies et contenus circulent en clair et peuvent être interceptés.",
     ),
@@ -86,6 +91,7 @@ def _strengths(report: dict[str, Any], present: set[str], is_https: bool) -> lis
         "transport": any(item.startswith("transport.") for item in present),
         "mixed": "content.mixed-content" in present,
         "third": bool(report.get("third_parties")),
+        "libs": any(item.startswith("libs.") for item in present),
     }
 
     rules: list[tuple[bool, str]] = [
@@ -103,6 +109,8 @@ def _strengths(report: dict[str, Any], present: set[str], is_https: bool) -> lis
         (is_https and ran("content") and not families["mixed"],
          "Contenus mixtes absents : tous les actifs sont chargés en HTTPS"),
         (ran("surface") and not families["third"], "Aucune dépendance tierce critique détectée"),
+        (ran("libs") and not families["libs"],
+         "Bibliothèques front-end à jour (aucune version à vulnérabilité connue)"),
     ]
     return [label for condition, label in rules if condition]
 

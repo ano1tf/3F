@@ -24,6 +24,7 @@ INDEX_HTML = """<!doctype html>
     <button type="submit">Connexion</button>
   </form>
   <iframe src="https://video.test/embed"></iframe>
+  <script src="/static/jquery-3.4.1.min.js"></script>
   <script src="/static/app.js"></script>
   <a href="/about">À propos</a>
   <a href="/contact">Contact</a>
@@ -49,6 +50,7 @@ class BadSiteHandler(BaseHTTPRequestHandler):
             "Content-Security-Policy", "default-src *; script-src 'unsafe-inline' http: *"
         )
         self.send_header("X-Powered-By", "PHP/7.4.3")
+        self.send_header("X-Debug-Token", "a1b2c3")
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(payload)
@@ -67,6 +69,12 @@ class BadSiteHandler(BaseHTTPRequestHandler):
                 "window.API='https://api.test.local/v1';\n",
                 "application/javascript",
             )
+        elif path == "/static/jquery-3.4.1.min.js":
+            self._send(
+                200,
+                "/*! jQuery v3.4.1 | (c) JS Foundation */\n!function(a,b){}(window,document);\n",
+                "application/javascript",
+            )
         elif path == "/static/app.js.map":
             self._send(
                 200,
@@ -82,6 +90,19 @@ class BadSiteHandler(BaseHTTPRequestHandler):
                   <input type="text" name="email">
                   <input type="password" name="secret">
                 </form></body></html>""",
+            )
+        elif path == "/terraform.tfstate":
+            self._send(
+                200,
+                '{"terraform_version": "1.6.2", "resources": []}',
+                "application/json",
+            )
+        elif path == "/.ssh/id_rsa":
+            self._send(
+                200,
+                "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA\n"
+                "-----END OPENSSH PRIVATE KEY-----\n",
+                "text/plain",
             )
         elif path == "/.git/HEAD":
             self._send(200, "ref: refs/heads/main\n", "text/plain")

@@ -8,7 +8,7 @@ Aucune exploitation, aucune injection, aucun contournement d'authentification : 
 visiteur peut observer.
 
 ```
-┌ VulnLens v6.1 ─────────────────────────────────────────────────────────────┐
+┌ VulnLens v6.2 ─────────────────────────────────────────────────────────────┐
 │  Risque critique · score 8/100     3 pages · 11 familles de contrôles      │
 ├────────────────────────────────────────────────────────────────────────────┤
 │  « Des accès ou des données sont exposés : à traiter immédiatement. »      │
@@ -18,6 +18,17 @@ visiteur peut observer.
 ```
 
 ---
+
+## Ce que fait la v6.2 — détection élargie
+
+| Capacité | Détail |
+|---|---|
+| **Bibliothèques front-end vulnérables** | Nouveau contrôle : jQuery, jQuery UI, Bootstrap 3/4, AngularJS, Handlebars, Lodash, Underscore, Moment.js, DOMPurify, CryptoJS, Axios et Vue 2. La version détectée est comparée à la **version corrigée** ; le constat cite les CVE, la version à installer et regroupe la preuve dans l'empreinte technique. Les scripts téléchargés sont réutilisés : aucune requête en double. |
+| **Analyse des JWT** | Un jeton public est décodé : `alg: none` (non signé) devient un constat **critique** de contournement d'authentification, et des revendications administratives en clair (`role: admin`, `is_admin: true`) un constat **élevé**. Le jeton reste masqué dans la preuve. |
+| **33 signatures de secrets** | + Anthropic, GitHub à granularité fine, GitLab, Hugging Face, npm, PyPI, DigitalOcean, Twilio, Shopify, Airtable, OAuth Google, webhooks Slack et Discord, secret de webhook Stripe, URL de base de données avec identifiants. La clé Anthropic n'est plus confondue avec une clé OpenAI. |
+| **50 fichiers exposés** | + état Terraform, clé privée SSH, `.git-credentials`, compte de service Google Cloud, heap dump Spring Actuator, profiler Symfony, `config/database.yml`, `.htpasswd`, schémas OpenAPI 3 et Swagger 2, console GraphiQL. |
+| **En-têtes de débogage** | Détection d'un profiler de framework actif en production (`X-Debug-Token`, `X-Symfony-Cache`) : fuite des requêtes SQL, variables d'environnement et sessions. |
+| **Restitution** | Les nouveaux constats ont leur propre rapport de situation (chemin d'accès, révélation, danger /10), leur vague de remédiation, et « bibliothèques à jour » apparaît dans les points forts quand le contrôle ne trouve rien. |
 
 ## Ce que fait la v6.1 — durcissement de l'instance
 
@@ -57,7 +68,7 @@ Détail complet, preuves et risques résiduels : **[SECURITY.md](SECURITY.md)**.
 
 | Capacité | Détail |
 |---|---|
-| **Chasse aux secrets** | Les scripts JavaScript publics sont téléchargés et passés au crible de 19 signatures : clés AWS/Azure/Stripe/SendGrid/GitHub/Slack/OpenAI, clés privées, JWT, identifiants en dur, `user:pass@` dans une URL. **Valeurs masquées** dans le rapport, source maps exposées signalées. |
+| **Chasse aux secrets** | Les scripts JavaScript publics sont téléchargés et passés au crible de 33 signatures : clés AWS/Azure/Stripe/SendGrid/GitHub/GitLab/npm/Shopify, clés privées, JWT, identifiants en dur, `user:pass@` dans une URL. **Valeurs masquées** dans le rapport, source maps exposées signalées. |
 | **Plan d'action** | Chaque constat est classé en trois vagues — *aujourd'hui*, *ce sprint*, *projet* — avec le gain de score potentiel chiffré (`+47 pts`), dans l'UI, les exports et `/api/scans/{id}/plan`. |
 | **Sécurité e-mail avancée** | DMARC (`p=none`, absence de `sp=`), SPF au-delà de 10 résolutions DNS, DKIM par balayage de sélecteurs, MTA-STS et TLS-RPT. |
 | **Surface tierce** | Cartographie des domaines chargés (CDN, analytique, paiement, vidéo, support…), avec leur rôle, et alerte sur les formulaires qui postent vers l'extérieur. |
@@ -116,8 +127,8 @@ Codes de sortie : `0` (ok), `1` (sous le seuil `--fail-under`), `2` (erreur d'an
 
 | Profil | Pages | Scripts | Contrôles |
 |---|---|---|---|
-| `quick` | 1 | 3 | Transport, en-têtes, cookies, exposition, contenu, secrets, DNS, TLS |
-| `standard` (défaut) | 6 | 6 | + e-mail avancé, surface tierce, agrégation multi-pages |
+| `quick` | 1 | 3 | Transport, en-têtes, cookies, exposition, contenu, secrets, bibliothèques, DNS, TLS |
+| `standard` (défaut) | 6 | 6 | + e-mail avancé, surface tierce, bibliothèques, agrégation multi-pages |
 | `deep` | 12 | 10 | + AXFR, sous-domaines, **takeover**, redirections ouvertes, TLS détaillé |
 
 Toujours **passif** : les requêtes sont des `GET`/`HEAD` sans charge utile, sans tentative de
@@ -240,13 +251,14 @@ app/
 │  ├─ aggregate.py    fusion des constats multi-pages
 │  ├─ fetcher.py      HTTP poli (timeouts, UA, taille bornée), TLS
 │  ├─ checks_http.py  en-têtes, cookies, méthodes, HSTS
-│  ├─ checks_secrets.py   19 signatures de secrets + source maps
+│  ├─ checks_secrets.py   33 signatures de secrets, JWT et source maps
+│  ├─ checks_libs.py      bibliothèques front-end vs versions corrigées (CVE)
 │  ├─ checks_email.py     DMARC, SPF, DKIM, MTA-STS, TLS-RPT
 │  ├─ checks_thirdparty.py cartographie des dépendances tierces
 │  ├─ recon_ct.py          sous-domaines via Certificate Transparency
 │  ├─ tech.py              WAF, CDN, CMS, frameworks, analytique
 │  ├─ checks_tls.py   certificat, protocoles, chaîne
-│  ├─ checks_exposure.py  38 chemins sensibles (.git, .env, backups…)
+│  ├─ checks_exposure.py  50 chemins sensibles (.git, .env, state Terraform, heap dump…)
 │  ├─ checks_content.py   formulaires, CSP, SRI, iframes, commentaires
 │  ├─ checks_dns.py   SPF, DMARC, DKIM, DNSSEC, CAA
 │  ├─ checks_deep.py  AXFR, sous-domaines, takeover, redirections
@@ -262,7 +274,7 @@ liste des pages concernées, pour éviter les rapports de 300 lignes répétitiv
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest        # 247 tests (dont 30 de durcissement)
+.venv/bin/python -m pytest        # 267 tests (dont 30 de durcissement)
 .venv/bin/ruff check .
 
 # interface : rendu simulé (jsdom), aucune erreur JavaScript tolérée
@@ -270,10 +282,11 @@ npm install                       # une seule fois (dev)
 npm run ui:check                  # parcours de scan + tableau de bord / tendance
 ```
 
-Couverture : normalisation et refus de cibles, scoring, en-têtes, contenu, DNS/deep, **crawl**,
+Couverture : normalisation et refus de cibles, scoring, en-têtes, contenu, DNS/deep, **bibliothèques front-end**,
+**analyse des JWT**, **crawl**,
 **agrégation**, **diff**, **alertes**, **vérification**, **takeover**, **secrets**, **e-mail**,
 **surface tierce**, **plan de remédiation**, **synthèse exécutive**, **surveillance**, **Certificate
-Transparency**, **empreinte technique**, persistance, API (historique, exports, jeton, diff, plan,
+Transparency**, **empreinte technique**, **secrets et expositions élargis**, persistance, API (historique, exports, jeton, diff, plan,
 watch, trend, verify), **sécurité de l'instance** (SSRF par redirection, SSRF de la
 vérification, AXFR interne, contournement de débit, CSRF, en-têtes, fuite d'erreurs),
 CLI (`scan`, `verify`, `watch`), et un **test de fumée de l'interface** sous jsdom. Fixture serveur volontairement vulnérable : 3 pages, clé AWS factice, source map exposée.

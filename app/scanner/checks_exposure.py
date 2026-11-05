@@ -472,6 +472,149 @@ PROBES: list[Probe] = [
         "exposure.graphql",
     ),
     Probe(
+        "/terraform.tfstate",
+        "État Terraform exposé",
+        Severity.CRITICAL,
+        "Le fichier d'état Terraform contient l'inventaire complet de l'infrastructure et, "
+        "souvent, des valeurs sensibles en clair : mots de passe de bases, clés d'accès, "
+        "identifiants de passerelle.",
+        "Retirez le fichier du dossier public, stockez l'état dans un backend distant chiffré "
+        "(S3 + verrou) et faites tourner tous les secrets qu'il contenait.",
+        "https://developer.hashicorp.com/terraform/language/state/sensitive-data",
+        _regex(r'"terraform_version"\s*:\s*"\d', "Version Terraform"),
+        "exposure.terraform-state",
+    ),
+    Probe(
+        "/.ssh/id_rsa",
+        "Clé privée SSH exposée",
+        Severity.CRITICAL,
+        "Une clé privée SSH téléchargeable permet de s'authentifier sur les serveurs qui "
+        "acceptent la clé publique correspondante, sans mot de passe.",
+        "Supprimez le fichier du dossier web, retirez la clé des `authorized_keys` concernés "
+        "et générez une nouvelle paire avec une phrase de passe.",
+        "https://www.ssh.com/academy/ssh/public-key-authentication",
+        _regex(r"-----BEGIN (?:RSA |OPENSSH |EC |DSA )?PRIVATE KEY-----", "Bloc de clé privée"),
+        "exposure.ssh-private-key",
+    ),
+    Probe(
+        "/.git-credentials",
+        "Identifiants Git en clair",
+        Severity.CRITICAL,
+        "Le fichier `.git-credentials` stocke des identifiants (utilisateur + jeton) pour les "
+        "dépôts distants : il donne un accès en écriture au code source.",
+        "Supprimez le fichier, révoquez les jetons concernés et utilisez un gestionnaire "
+        "d'identifiants ou des déploiements par clé SSH.",
+        "https://git-scm.com/docs/gitcredentials",
+        _regex(r"(?m)^https?://[^\s:/]+:[^\s@]+@", "Ligne identifiant@hôte"),
+        "exposure.git-credentials",
+    ),
+    Probe(
+        "/service-account.json",
+        "Clé de compte de service Google Cloud exposée",
+        Severity.CRITICAL,
+        "Un fichier de compte de service GCP permet de se connecter aux API Google Cloud avec "
+        "les droits du compte (stockage, base, facturation).",
+        "Supprimez la clé, révoquez-la dans IAM, et utilisez des identités de charge de travail "
+        "ou des identités managées au lieu d'un fichier de clé.",
+        "https://cloud.google.com/iam/docs/best-practices-service-accounts",
+        _regex(r'"type"\s*:\s*"service_account"', "Compte de service"),
+        "exposure.gcp-service-account",
+    ),
+    Probe(
+        "/credentials.json",
+        "Fichier d'identifiants cloud exposé",
+        Severity.CRITICAL,
+        "Un fichier d'identifiants de compte de service est servi publiquement : les API cloud "
+        "sont accessibles avec ses droits.",
+        "Retirez le fichier du dossier public et révoquez la clé.",
+        "https://cloud.google.com/iam/docs/best-practices-service-accounts",
+        _regex(r'"type"\s*:\s*"service_account"', "Compte de service"),
+        "exposure.gcp-service-account",
+    ),
+    Probe(
+        "/actuator/heapdump",
+        "Dump mémoire Spring Actuator exposé",
+        Severity.CRITICAL,
+        "Le heap dump contient la mémoire du processus Java : mots de passe de base, clés de "
+        "chiffrement, jetons de session et données personnelles des utilisateurs.",
+        "Fermez `/actuator/**` (au minimum `heapdump`, `env`, `threaddump`) et n'exposez "
+        "Actuator que sur un port ou une interface d'administration.",
+        "https://docs.spring.io/spring-boot/docs/current/reference/html/actuator.html",
+        _body_startswith(b"JAVA PROFILE"),
+        "exposure.actuator-heapdump",
+    ),
+    Probe(
+        "/config/database.yml",
+        "Configuration de base de données exposée",
+        Severity.CRITICAL,
+        "Le fichier de configuration décrit la base (hôte, utilisateur, mot de passe) : la base "
+        "est joignable directement avec ces identifiants.",
+        "Retirez le fichier du dossier public, changez le mot de passe et restreignez l'accès "
+        "réseau à la base.",
+        "https://owasp.org/www-project-top-ten/2017/A3_2017-Sensitive_Data_Exposure",
+        _regex(
+            r"(?s)adapter:\s*\w+.{0,600}?password:\s*\S+",
+            "Bloc adapter + password",
+        ),
+        "exposure.database-config",
+    ),
+    Probe(
+        "/.htpasswd",
+        "Fichier de mots de passe (htpasswd) exposé",
+        Severity.HIGH,
+        "Les empreintes de mots de passe des comptes protégés par authentification HTTP sont "
+        "téléchargeables : elles peuvent être cassées hors ligne.",
+        "Déplacez le fichier hors du dossier web et utilisez des empreintes fortes (bcrypt).",
+        "https://httpd.apache.org/docs/2.4/programs/htpasswd.html",
+        _regex(r"(?m)^[^:\s]+:\$(?:apr1|2[aby]|5|6)\$", "Empreinte de mot de passe"),
+        "exposure.htpasswd",
+    ),
+    Probe(
+        "/openapi.json",
+        "Schéma OpenAPI 3 exposé",
+        Severity.MEDIUM,
+        "Le schéma OpenAPI décrit tous les endpoints, paramètres et schémas de données : il "
+        "fournit une carte complète de l'API, y compris les routes non documentées publiquement.",
+        "Protégez la documentation par authentification ou ne l'exposez pas en production.",
+        "https://swagger.io/specification/",
+        _regex(r'"openapi"\s*:\s*"3\.', "Document OpenAPI 3"),
+        "exposure.openapi",
+    ),
+    Probe(
+        "/swagger/v1/swagger.json",
+        "Schéma Swagger 2.0 exposé",
+        Severity.MEDIUM,
+        "Le schéma Swagger décrit l'API complète (routes, paramètres, modèles) et facilite "
+        "l'énumération méthodique des points d'entrée.",
+        "Restreignez l'accès au schéma en production.",
+        "https://swagger.io/specification/v2/",
+        _regex(r'"swagger"\s*:\s*"2\.', "Document Swagger 2.0"),
+        "exposure.swagger-schema",
+    ),
+    Probe(
+        "/graphiql",
+        "Console GraphiQL exposée",
+        Severity.MEDIUM,
+        "La console GraphiQL permet d'exécuter des requêtes GraphQL depuis le navigateur, "
+        "notamment l'introspection, qui révèle tout le schéma de l'API.",
+        "Désactivez l'IDE en production et l'introspection pour les clients non authentifiés.",
+        "https://cheatsheetseries.owasp.org/cheatsheets/GraphQL_Cheat_Sheet.html",
+        _contains("GraphiQL", "graphql-playground", "Apollo Sandbox", ignore_html=False),
+        "exposure.graphiql",
+    ),
+    Probe(
+        "/_profiler",
+        "Profiler Symfony exposé",
+        Severity.HIGH,
+        "Le profiler de développement expose les requêtes SQL, variables d'environnement, "
+        "jetons de session et parfois les e-mails envoyés : c'est une fuite interne complète.",
+        "Désactivez le profiler en production (`APP_ENV=prod`, `debug=false`) et bloquez "
+        "`/_profiler` au niveau du serveur.",
+        "https://symfony.com/doc/current/profiler.html",
+        _regex(r"symfony profiler|sf-profiler|debug-toolbar|sf-toolbar", "Interface du profiler", re.I),
+        "exposure.symfony-profiler",
+    ),
+    Probe(
         "/.well-known/security.txt",
         "security.txt absent",
         Severity.INFO,
