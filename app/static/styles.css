@@ -838,3 +838,41 @@ h1 {
   border: 1px solid rgba(52, 211, 153, .4); border-radius: 999px;
   padding: 0 5px; vertical-align: middle;
 }
+
+
+/* ==================== v4.0 : plan d'action, dépendances ==================== */
+
+.plan-cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.plan-col {
+  border: 1px solid var(--border); border-radius: 12px;
+  padding: 12px 14px; background: rgba(255, 255, 255, .02);
+}
+.plan-col h3 {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin: 0 0 4px; font-size: 12px; letter-spacing: .02em;
+}
+.plan-count {
+  font-size: 11px; font-weight: 700; color: var(--muted);
+  border: 1px solid var(--border); border-radius: 999px; padding: 0 7px;
+}
+.plan-detail { margin: 0 0 10px; font-size: 11.5px; color: var(--muted); }
+ul.plan-items { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+ul.plan-items li { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; }
+ul.plan-items li.empty { color: var(--muted); font-style: italic; }
+.plan-body { display: grid; gap: 2px; }
+.plan-body strong { font-size: 12.5px; font-weight: 600; color: #dbe7f4; }
+.plan-body em { font-size: 11.5px; color: var(--muted); font-style: normal; }
+
+ul.third { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+ul.third li {
+  display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap;
+  font-size: 12.5px; padding: 5px 0; border-bottom: 1px dashed var(--border);
+}
+ul.third li:last-child { border-bottom: 0; }
+ul.third .host { font-family: var(--mono); font-size: 12px; color: #a9d8e8; }
+ul.third .role { font-size: 11px; color: var(--accent); }
+ul.third .res { margin-left: auto; font-size: 11px; color: var(--muted); }
+
+@media (max-width: 780px) {
+  .plan-cols { grid-template-columns: 1fr; }
+}

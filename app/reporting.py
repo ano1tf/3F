@@ -7,7 +7,7 @@ import json
 from datetime import datetime
 from typing import Any
 
-from . import config
+from . import config, remediation
 from .models import SEVERITY_LABELS_FR, Severity
 
 SARIF_LEVEL = {
@@ -153,6 +153,23 @@ def to_markdown(report: dict[str, Any]) -> str:
         )),
         "",
     ]
+
+    plan = remediation.build_plan(report)
+    if plan["available"]:
+        lines += [
+            "## Plan d'action",
+            remediation.to_markdown(plan),
+            "",
+        ]
+
+    third_parties = report.get("third_parties") or []
+    if third_parties:
+        lines.append("## Dépendances tierces")
+        lines += [
+            f"- `{item['host']}` — {item['role']} ({', '.join(item['resources'])})"
+            for item in third_parties[:15]
+        ]
+        lines.append("")
 
     diff = report.get("diff") or {}
     if diff.get("available"):
@@ -300,6 +317,46 @@ def to_html(report: dict[str, Any]) -> str:
   <h2>Pages analysées ({len(pages)})</h2>
   <div class="panel"><ul class="pages">{rows}</ul></div>'''
 
+    plan = remediation.build_plan(report)
+
+    plan_html = ""
+    if plan["available"]:
+        columns = []
+        for key in ("quick", "sprint", "project"):
+            bucket = plan["buckets"][key]
+            items = "".join(
+                f'<li><span class="sev" data-sev="{_e(item["severity"])}">'
+                f'{_e(item["severity_label"])}</span>'
+                f'<strong>{_e(item["title"])}</strong>'
+                f'<em>{_e(item["action"])}</em></li>'
+                for item in bucket["items"][:8]
+            ) or '<li class="empty">Rien à planifier</li>'
+            columns.append(
+                f'<div class="plan-col"><h4>{_e(bucket["label"])} — '
+                f'{len(bucket["items"])}</h4><p class="plan-detail">{_e(bucket["detail"])}</p>'
+                f'<ul class="plan">{items}</ul></div>'
+            )
+        plan_html = (
+            f'<h2>Plan d\'action</h2><div class="panel">'
+            f'<p class="delta">Score {plan["current_score"]}/100 aujourd\'hui, '
+            f'<strong>{plan["projected_score"]}/100</strong> une fois tout corrigé '
+            f'(+{plan["potential_gain"]} pts).</p>'
+            f'<div class="plan-cols">{"".join(columns)}</div></div>'
+        )
+
+    third_html = ""
+    if report.get("third_parties"):
+        rows = "".join(
+            f'<li><span class="host">{_e(item["host"])}</span>'
+            f'<span class="role">{_e(item["role"])}</span>'
+            f'<span class="res">{_e(", ".join(item["resources"]))}</span></li>'
+            for item in (report.get("third_parties") or [])[:15]
+        )
+        third_html = (
+            f'<h2>Dépendances tierces ({len(report["third_parties"])})</h2>'
+            f'<div class="panel"><ul class="third">{rows}</ul></div>'
+        )
+
     checks_html = "".join(
         f'<li><span class="dot {_e(check.get("status", "ok"))}"></span>{_e(check.get("label", ""))}'
         f'<em>{len(check.get("findings") or [])} constat(s)</em></li>'
@@ -380,6 +437,30 @@ def to_html(report: dict[str, Any]) -> str:
   ul.pages .code {{ font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11px; color:#1b8a5a; }}
   ul.pages em {{ margin-left:auto; color:var(--muted); font-style:normal; font-size:11.5px; }}
   .muted {{ color:var(--muted); font-size:12.5px; }}
+  .plan-cols {{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }}
+  .plan-col h4 {{ margin-top:0; }}
+  .plan-detail {{ margin:0 0 10px; font-size:12px; color:var(--muted); }}
+  ul.plan {{ list-style:none; margin:0; padding:0; font-size:12.5px; }}
+  ul.plan li {{ padding:7px 0; border-bottom:1px dashed var(--line); }}
+  ul.plan li:last-child {{ border-bottom:0; }}
+  ul.plan li.empty {{ color:var(--muted); font-style:italic; }}
+  ul.plan .sev {{ display:inline-block; font-size:10px; font-weight:700; text-transform:uppercase;
+                  letter-spacing:.06em; margin-right:6px; }}
+  ul.plan .sev[data-sev="critical"] {{ color:#c0223a; }}
+  ul.plan .sev[data-sev="high"] {{ color:#c25a12; }}
+  ul.plan .sev[data-sev="medium"] {{ color:#b8860b; }}
+  ul.plan .sev[data-sev="low"] {{ color:#4a6fa5; }}
+  ul.plan .sev[data-sev="info"] {{ color:#5b6b7f; }}
+  ul.plan strong {{ display:block; font-size:12.5px; }}
+  ul.plan em {{ display:block; color:var(--muted); font-style:normal; font-size:11.5px; margin-top:2px; }}
+  ul.third {{ list-style:none; margin:0; padding:0; font-size:12.5px; }}
+  ul.third li {{ display:flex; gap:10px; align-items:baseline; padding:5px 0;
+                 border-bottom:1px dashed var(--line); flex-wrap:wrap; }}
+  ul.third li:last-child {{ border-bottom:0; }}
+  ul.third .host {{ font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; }}
+  ul.third .role {{ font-size:11px; color:#0b5cad; }}
+  ul.third .res {{ margin-left:auto; color:var(--muted); font-size:11px; }}
+  @media (max-width: 760px) {{ .plan-cols, .diff-cols {{ grid-template-columns:1fr; }} }}
   .dot {{ width:9px; height:9px; border-radius:50%; background:#1b8a5a; }}
   .dot.error {{ background:#c25a12; }}
   .dot.skipped {{ background:#98a6b8; }}
@@ -412,7 +493,8 @@ def to_html(report: dict[str, Any]) -> str:
 
   {f'<h2>À corriger en priorité</h2><div class="panel"><ol class="priority">{priority_html}</ol></div>' if priority_html else ""}
 
-  {diff_html}
+  {plan_html}
+{diff_html}
 {pages_html}
 
   <h2>Constats ({len(findings)})</h2>
@@ -420,6 +502,8 @@ def to_html(report: dict[str, Any]) -> str:
 
   <h2>Empreinte technique</h2>
   <table>{fingerprint_html or '<tr><td>Aucune donnée collectée.</td></tr>'}</table>
+
+  {third_html}
 
   <h2>Contrôles exécutés</h2>
   <div class="panel"><ul class="checks">{checks_html}</ul></div>

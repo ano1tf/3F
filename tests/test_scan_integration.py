@@ -109,3 +109,31 @@ def test_quick_profile_stays_single_page(vulnerable_server):
     report = asyncio.run(run_scan(vulnerable_server.url, emit, profile="quick"))
     assert report.profile == "quick"
     assert len(report.pages) == 1
+
+
+def test_standard_profile_finds_secrets_and_third_parties(vulnerable_server):
+    async def emit(_payload: dict) -> None:
+        return None
+
+    report = asyncio.run(run_scan(vulnerable_server.url, emit, profile="standard"))
+    ids = {finding.id for finding in report.findings}
+
+    assert "secrets.aws-access-key" in ids
+    assert "secrets.source-map" in ids
+    secret = next(f for f in report.findings if f.id == "secrets.aws-access-key")
+    assert "AKIAZ7Q2XK4M9PLW3TRV" not in secret.evidence
+
+    hosts = {item["host"] for item in report.third_parties}
+    assert "cdn.insecure.test" in hosts
+    assert "video.test" in hosts
+    assert all(item["role"] for item in report.third_parties)
+
+
+def test_foreign_form_finding_is_not_duplicated(vulnerable_server):
+    async def emit(_payload: dict) -> None:
+        return None
+
+    report = asyncio.run(run_scan(vulnerable_server.url, emit, profile="standard"))
+    ids = {finding.id for finding in report.findings}
+    assert "surface.foreign-form-action" in ids
+    assert "content.external-form-action" not in ids

@@ -110,3 +110,16 @@ def test_html_export_includes_diff_section(client):
 
     sarif = client.get("/api/scans/recent/sarif").json()
     assert sarif["runs"][0]["properties"]["pagesAnalyzed"] == 0
+
+
+def test_plan_endpoint(client):
+    asyncio.run(
+        db.save_scan(
+            make_report("planme", 55, [f("exposure.git", "critical"), f("headers.csp", "medium")])
+        )
+    )
+    plan = client.get("/api/scans/planme/plan").json()
+    assert plan["available"] is True
+    assert plan["counts"]["quick"] == 2
+    assert plan["buckets"]["quick"]["items"][0]["id"] == "exposure.git"
+    assert plan["potential_gain"] > 0

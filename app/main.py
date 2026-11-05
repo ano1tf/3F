@@ -21,7 +21,7 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import alerts, config, db, diffing, reporting, verify
+from . import alerts, config, db, diffing, remediation, reporting, verify
 from .models import SEVERITY_LABELS_FR
 from .safety import ScanError, normalize_target
 from .scanner.engine import run_scan
@@ -134,12 +134,12 @@ async def meta() -> dict:
             {
                 "key": "standard",
                 "label": "Standard",
-                "detail": "Jusqu'à 6 pages internes, en-têtes et contenu agrégés",
+                "detail": "Jusqu'à 6 pages, secrets dans les scripts, e-mail avancé, tiers",
             },
             {
                 "key": "deep",
                 "label": "Approfondi",
-                "detail": "Jusqu'à 12 pages + AXFR, sous-domaines, takeovers, redirections",
+                "detail": "12 pages, 10 scripts + AXFR, sous-domaines, takeovers, redirections",
             },
         ],
         "severities": [
@@ -156,7 +156,11 @@ async def meta() -> dict:
             "Fichiers exposés : .git/.env, sauvegardes, .aws, logs, Actuator, phpMyAdmin…",
             "Fuite d'information : versions, traces d'erreur, commentaires HTML",
             "Contenu : contenu mixte, formulaires non chiffrés, SRI, iframes, CSRF, cache",
-            "DNS : SPF, DMARC, CAA",
+            "DNS : SPF, DMARC (p/sp), CAA, DKIM, MTA-STS, TLS-RPT",
+            "Secrets : clés cloud/SaaS, clés privées, JWT, identifiants en dur dans les scripts",
+            "Surface tierce : domaines chargés, rôles, formulaires qui pointent à l'extérieur",
+            "Source maps exposées",
+            "Plan d'action : quick/sprint/projet avec gain de score potentiel",
         ],
         "limits": [
             "Aucune tentative d'exploitation, aucune charge destructive",
@@ -289,6 +293,12 @@ async def api_scans(host: str | None = None, limit: int = 50) -> dict:
 async def api_stats() -> dict:
     """Indicateurs du tableau de bord : volume, score moyen, tendance, sévérités."""
     return await db.stats()
+
+
+@app.get("/api/scans/{scan_id}/plan")
+async def api_scan_plan(scan_id: str) -> dict:
+    """Plan de remédiation : trois vagues d'effort et gain de score potentiel."""
+    return remediation.build_plan(await _report_or_404(scan_id))
 
 
 @app.get("/api/scans/{scan_id}/diff")

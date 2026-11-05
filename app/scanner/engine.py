@@ -12,7 +12,17 @@ from urllib.parse import urlsplit, urlunsplit
 from .. import config, verify
 from ..models import CheckResult, Finding, ScanReport
 from ..safety import ScanError, validate_target
-from . import checks_content, checks_deep, checks_dns, checks_exposure, checks_http, checks_tls
+from . import (
+    checks_content,
+    checks_deep,
+    checks_dns,
+    checks_email,
+    checks_exposure,
+    checks_http,
+    checks_secrets,
+    checks_thirdparty,
+    checks_tls,
+)
 from .aggregate import aggregate, coverage_note
 from .crawl import CrawlPage, crawl
 from .fetcher import Fetcher, same_origin
@@ -28,9 +38,9 @@ from .scoring import (
 Emitter = Callable[[dict], Awaitable[None]]
 
 PROFILES: dict[str, dict] = {
-    "quick": {"pages": 1, "deep": False, "label": "Rapide"},
-    "standard": {"pages": 6, "deep": False, "label": "Standard"},
-    "deep": {"pages": 12, "deep": True, "label": "Approfondi"},
+    "quick": {"pages": 1, "deep": False, "scripts": 3, "email": False, "label": "Rapide"},
+    "standard": {"pages": 6, "deep": False, "scripts": 6, "email": True, "label": "Standard"},
+    "deep": {"pages": 12, "deep": True, "scripts": 10, "email": True, "label": "Approfondi"},
 }
 
 STEPS = [
@@ -39,9 +49,12 @@ STEPS = [
     ("crawl", "Exploration des pages internes"),
     ("headers", "Analyse des en-têtes de sécurité"),
     ("dns", "Vérification DNS, SPF et DMARC"),
+    ("email", "Authentification e-mail avancée (DKIM, MTA-STS, TLS-RPT)"),
     ("cors", "Test CORS et méthodes HTTP"),
     ("exposure", "Recherche de fichiers exposés"),
     ("content", "Analyse du contenu et des formulaires"),
+    ("surface", "Cartographie des dépendances tierces"),
+    ("secrets", "Recherche de secrets dans les scripts"),
     ("deep", "Contrôles approfondis (AXFR, sous-domaines, redirections)"),
     ("score", "Calcul du score et du rapport"),
 ]
@@ -128,6 +141,11 @@ async def run_scan(
             else None
         )
         dns_task = asyncio.create_task(checks_dns.check_dns(target.host))
+        email_task = (
+            asyncio.create_task(checks_email.check_email(target.host))
+            if selected.get("email")
+            else None
+        )
 
         response = await main_task
         if response.error:
@@ -230,6 +248,8 @@ async def run_scan(
         )
 
         await advance("dns", 44, "Vérification SPF, DMARC et CAA")
+        email_findings: list[Finding] = []
+        email_meta: dict[str, str] = {}
         try:
             dns_findings, dns_meta = await asyncio.wait_for(dns_task, timeout=12)
         except Exception as exc:  # noqa: BLE001
@@ -241,6 +261,25 @@ async def run_scan(
             findings.extend(dns_findings)
             checks.append(CheckResult("dns", "DNS & e-mail", findings=dns_findings))
         report.fingerprint.update(dns_meta)
+
+        if email_task is not None:
+            try:
+                email_findings, email_meta = await asyncio.wait_for(email_task, timeout=12)
+            except Exception as exc:  # noqa: BLE001
+                checks.append(
+                    CheckResult(
+                        "email",
+                        "Authentification e-mail",
+                        status="error",
+                        detail=f"Contrôles e-mail indisponibles ({exc})",
+                    )
+                )
+            else:
+                findings.extend(email_findings)
+                checks.append(
+                    CheckResult("email", "Authentification e-mail", findings=email_findings)
+                )
+                report.fingerprint.update(email_meta)
 
         await advance("cors", 54, "Test CORS et méthodes HTTP")
         try:
@@ -305,6 +344,54 @@ async def run_scan(
         if generator:
             report.fingerprint.setdefault("generateur", generator)
 
+        # ------------------------------------------------------------------
+        # Phase 5 bis — dépendances tierces et secrets dans les scripts
+        # ------------------------------------------------------------------
+        await advance("surface", 84, f"Cartographie des dépendances tierces ({len(pages)} page(s))")
+        try:
+            report.third_parties = checks_thirdparty.summarize(pages)
+            surface_findings = checks_thirdparty.build_findings(report.third_parties, len(pages))
+            findings.extend(surface_findings)
+            checks.append(
+                CheckResult(
+                    "surface",
+                    "Surface tierce",
+                    detail=f"{len(report.third_parties)} domaine(s) tiers",
+                    findings=surface_findings,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            checks.append(
+                CheckResult("surface", "Surface tierce", status="error", detail=f"Phase interrompue : {exc}")
+            )
+
+        await advance("secrets", 88, "Recherche de secrets dans les scripts publics")
+        try:
+            scripts: list[str] = []
+            for page in pages:
+                scripts.extend(checks_content.parse_page(page.response.text).scripts)
+            secret_findings, secret_meta = await checks_secrets.scan_scripts(
+                fetcher,
+                response.url,
+                scripts,
+                inline_html=response.text,
+                limit=int(selected.get("scripts", 6)),
+            )
+            report.fingerprint.update(secret_meta)
+            findings.extend(secret_findings)
+            checks.append(
+                CheckResult(
+                    "secrets",
+                    "Secrets & scripts",
+                    detail=f"{secret_meta.get('scripts_analyses', '0')} script(s) analysé(s)",
+                    findings=secret_findings,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            checks.append(
+                CheckResult("secrets", "Secrets & scripts", status="error", detail=f"Phase interrompue : {exc}")
+            )
+
         headers_map = {k.lower(): v for k, v in response.headers.items()}
         headers_map["__url__"] = response.url
         report.fingerprint.update(checks_exposure.detect_fingerprint(headers_map, response.text))
@@ -316,7 +403,7 @@ async def run_scan(
         # Phase 6 — contrôles approfondis (profil « deep »)
         # ------------------------------------------------------------------
         if selected["deep"]:
-            await advance("deep", 88, "AXFR, sous-domaines et redirections ouvertes")
+            await advance("deep", 92, "AXFR, sous-domaines et redirections ouvertes")
             deep_findings: list[Finding] = []
             try:
                 deep_findings = await checks_deep.run_deep(fetcher, target.host, response.url)
@@ -336,6 +423,11 @@ async def run_scan(
         # Phase 7 — score
         # ------------------------------------------------------------------
         await advance("score", 95, "Calcul du score et classement des constats")
+        # Un formulaire envoyé à un tiers est couvert par la surface tierce : on évite le doublon.
+        if any(finding.id == "surface.foreign-form-action" for finding in findings):
+            findings = [
+                finding for finding in findings if finding.id != "content.external-form-action"
+            ]
         findings = dedupe(findings)
         report.findings = sort_findings(findings)
         report.score = score_findings(report.findings)

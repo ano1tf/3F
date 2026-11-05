@@ -98,6 +98,7 @@ class ScanReport:
     profile: str = "quick"
     verified: bool = False
     pages: list[dict[str, Any]] = field(default_factory=list)
+    third_parties: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -117,5 +118,6 @@ class ScanReport:
             "profile": self.profile,
             "verified": self.verified,
             "pages": self.pages,
+            "third_parties": self.third_parties,
             "errors": self.errors,
         }

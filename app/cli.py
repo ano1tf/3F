@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from . import config, db, reporting, verify
+from . import config, db, remediation, reporting, verify
 from .models import Severity
 from .safety import ScanError, normalize_target
 from .scanner.engine import run_scan
@@ -104,9 +104,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     scan.add_argument(
         "--format",
-        choices=["text", "json", "sarif", "markdown", "html"],
+        choices=["text", "json", "sarif", "markdown", "html", "plan"],
         default="text",
-        help="Format de sortie (défaut : text)",
+        help="Format de sortie : text, json, sarif, markdown, html, plan (défaut : text)",
     )
     scan.add_argument("--output", "-o", help="Écrire le rapport dans un fichier")
     scan.add_argument(
@@ -142,6 +142,8 @@ def _render(report_dict: dict, fmt: str) -> str:
         return reporting.to_markdown(report_dict)
     if fmt == "html":
         return reporting.to_html(report_dict)
+    if fmt == "plan":
+        return remediation.to_markdown(remediation.build_plan(report_dict))
     # text
     lines = [
         f"{report_dict['final_url'] or report_dict['target']}",

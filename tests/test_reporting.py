@@ -175,3 +175,21 @@ def test_sarif_exposes_domain_metadata():
     assert properties["domainVerified"] is True
     assert properties["pagesAnalyzed"] == 2
     assert "https://cible.test/contact" in properties["pages"]
+
+
+def test_html_contains_action_plan_and_third_parties():
+    report = sample_report()
+    report["third_parties"] = [
+        {"host": "cdn.autre.test", "role": "CDN & polices", "resources": ["script"], "pages": 1},
+    ]
+    html = reporting.to_html(report)
+    assert "Plan d'action" in html
+    assert "Aujourd" in html
+    assert "Dépendances tierces (1)" in html
+    assert "cdn.autre.test" in html
+
+
+def test_markdown_contains_action_plan():
+    markdown = reporting.to_markdown(sample_report())
+    assert "## Plan d'action" in markdown
+    assert "Score actuel" in markdown

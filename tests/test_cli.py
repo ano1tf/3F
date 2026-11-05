@@ -120,3 +120,27 @@ def test_cli_default_profile_is_standard():
 
     args = cli.build_parser().parse_args(["scan", "exemple.fr"])
     assert args.profile == "standard"
+
+
+def test_cli_plan_format(capsys):
+    from app import cli
+
+    report = {
+        "target": "https://cible.test/",
+        "final_url": "https://cible.test/",
+        "score": 50,
+        "grade": "D",
+        "findings": [
+            {
+                "id": "exposure.git",
+                "title": "Dépôt Git exposé",
+                "severity": "critical",
+                "severity_label": "Critique",
+                "category": "Exposition",
+                "remediation": "Bloquez .git/",
+            }
+        ],
+    }
+    output = cli._render(report, "plan")
+    assert "Bloquez .git/" in output
+    assert "Score actuel" in output

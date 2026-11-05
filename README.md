@@ -8,19 +8,24 @@ Aucune exploitation, aucune injection, aucun contournement d'authentification : 
 visiteur peut observer.
 
 ```
-┌ VulnLens v3.0 ─────────────────────────────────────────────────────────────┐
+┌ VulnLens v4.0 ─────────────────────────────────────────────────────────────┐
 │  Score 33/100 — E      □□□□□□□□□□ 3 pages × 38 contrôles     ✓ vérifié     │
 ├────────────────────────────────────────────────────────────────────────────┤
-│  Nouveaux depuis la dernière analyse : 2   Corrigés : 5   Persistants : 12 │
+│  Plan : 12 actions aujourd'hui · 7 ce sprint · 3 projets   (+47 pts)       │
+│  1 clé AWS exposée dans app.js · 4 domaines tiers · source map publique    │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Ce que fait la v3 (le saut d'échelle)
+## Ce que fait la v4
 
 | Capacité | Détail |
 |---|---|
+| **Chasse aux secrets** | Les scripts JavaScript publics sont téléchargés et passés au crible de 19 signatures : clés AWS/Azure/Stripe/SendGrid/GitHub/Slack/OpenAI, clés privées, JWT, identifiants en dur, `user:pass@` dans une URL. **Valeurs masquées** dans le rapport, source maps exposées signalées. |
+| **Plan d'action** | Chaque constat est classé en trois vagues — *aujourd'hui*, *ce sprint*, *projet* — avec le gain de score potentiel chiffré (`+47 pts`), dans l'UI, les exports et `/api/scans/{id}/plan`. |
+| **Sécurité e-mail avancée** | DMARC (`p=none`, absence de `sp=`), SPF au-delà de 10 résolutions DNS, DKIM par balayage de sélecteurs, MTA-STS et TLS-RPT. |
+| **Surface tierce** | Cartographie des domaines chargés (CDN, analytique, paiement, vidéo, support…), avec leur rôle, et alerte sur les formulaires qui postent vers l'extérieur. |
 | **Analyse multi-pages** | Un site n'est pas jugé sur sa page d'accueil : jusqu'à 12 pages internes explorées, constats fusionnés avec la preuve « présent sur N des M pages ». |
 | **Preuve de propriété** | Jeton à publier en DNS (`_vulnlens.<domaine>`) ou en fichier (`/.well-known/vulnlens.txt`). Le rapport est marqué **vérifié** : plus d'ambiguïté juridique. |
 | **Subdomain takeover** | Sous-domaines résolus, CNAME comparés à 20 signatures de services (S3, GitHub Pages, Heroku, Azure, Netlify, Shopify…) + détection de page d'erreur orpheline. |
@@ -56,6 +61,9 @@ python -m app.cli scan https://exemple.fr --profile deep --fail-under 70 \
 # format SARIF pour GitHub Code Scanning
 python -m app.cli scan https://exemple.fr --format sarif -o vulnlens.sarif
 
+# plan d'action seul (Markdown), idéal pour un ticket ou une revue de sprint
+python -m app.cli scan https://exemple.fr --format plan
+
 # vérifier la propriété d'un domaine avant de scanner
 python -m app.cli verify exemple.fr
 ```
@@ -66,11 +74,11 @@ Codes de sortie : `0` (ok), `1` (sous le seuil `--fail-under`), `2` (erreur d'an
 
 ## Profils d'analyse
 
-| Profil | Pages | Contrôles |
-|---|---|---|
-| `quick` | 1 | Transport, en-têtes, cookies, exposition de fichiers, contenu, DNS, TLS |
-| `standard` (défaut) | 6 | + agrégation multi-pages, en-têtes et contenu page par page |
-| `deep` | 12 | + transfert de zone AXFR, sous-domaines, **takeover**, redirections ouvertes, TLS détaillé |
+| Profil | Pages | Scripts | Contrôles |
+|---|---|---|---|
+| `quick` | 1 | 3 | Transport, en-têtes, cookies, exposition, contenu, secrets, DNS, TLS |
+| `standard` (défaut) | 6 | 6 | + e-mail avancé, surface tierce, agrégation multi-pages |
+| `deep` | 12 | 10 | + AXFR, sous-domaines, **takeover**, redirections ouvertes, TLS détaillé |
 
 Toujours **passif** : les requêtes sont des `GET`/`HEAD` sans charge utile, sans tentative de
 connexion, sans force brute, sans exploitation. Une case « je suis autorisé à tester cette cible » est
@@ -107,9 +115,9 @@ Le jeton est généré par `GET /api/verify/{hôte}`, la vérification se lance 
 - **Markdown** : PR, wiki, ticket.
 - **JSON** : tout le rapport, y compris `pages`, `verified`, `score_breakdown`, `fingerprint`.
 
-Contenu du HTML : bandeau de score, **priorités d'action**, **évolution vs analyse précédente**,
-constats détaillés (preuve + remédiation + référence), empreinte technique, **pages analysées**,
-contrôles exécutés avec leur durée.
+Contenu du HTML : bandeau de score, **plan d'action en trois vagues**, **évolution vs analyse
+précédente**, **dépendances tierces**, constats détaillés (preuve + remédiation + référence),
+empreinte technique, **pages analysées**, contrôles exécutés avec leur durée.
 
 ---
 
@@ -123,6 +131,7 @@ contrôles exécutés avec leur durée.
 | `GET` | `/api/scans` | Historique (filtres `host`, `limit`) |
 | `GET` | `/api/scans/{id}` | Rapport complet |
 | `GET` | `/api/scans/{id}/diff` | Écart avec l'analyse précédente du même hôte |
+| `GET` | `/api/scans/{id}/plan` | Plan de remédiation (quick / sprint / projet) + gain potentiel |
 | `GET` | `/api/scans/{id}/report.html` | Export HTML |
 | `GET` | `/api/scans/{id}/sarif` | Export SARIF |
 | `GET` | `/api/scans/{id}/markdown` | Export Markdown |
@@ -165,6 +174,7 @@ app/
 ├─ safety.py          normalisation, refus des cibles privées
 ├─ verify.py          preuve de propriété (DNS TXT / .well-known)
 ├─ diffing.py         comparaison de deux rapports
+├─ remediation.py     plan d'action (effort, priorité, gain de score)
 ├─ alerts.py          webhook best-effort
 ├─ db.py              SQLite, migrations, stats, analyse précédente
 ├─ reporting.py       HTML, SARIF, Markdown
@@ -174,6 +184,9 @@ app/
 │  ├─ aggregate.py    fusion des constats multi-pages
 │  ├─ fetcher.py      HTTP poli (timeouts, UA, taille bornée), TLS
 │  ├─ checks_http.py  en-têtes, cookies, méthodes, HSTS
+│  ├─ checks_secrets.py   19 signatures de secrets + source maps
+│  ├─ checks_email.py     DMARC, SPF, DKIM, MTA-STS, TLS-RPT
+│  ├─ checks_thirdparty.py cartographie des dépendances tierces
 │  ├─ checks_tls.py   certificat, protocoles, chaîne
 │  ├─ checks_exposure.py  38 chemins sensibles (.git, .env, backups…)
 │  ├─ checks_content.py   formulaires, CSP, SRI, iframes, commentaires
@@ -191,18 +204,22 @@ liste des pages concernées, pour éviter les rapports de 300 lignes répétitiv
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest        # 135 tests
+.venv/bin/python -m pytest        # 169 tests
 .venv/bin/ruff check .
 ```
 
 Couverture : normalisation et refus de cibles, scoring, en-têtes, contenu, DNS/deep, **crawl**,
-**agrégation**, **diff**, **alertes**, **vérification**, **takeover**, persistance, API (historique,
-exports, jeton, diff, verify), CLI, fixture serveur volontairement vulnérable (3 pages).
+**agrégation**, **diff**, **alertes**, **vérification**, **takeover**, **secrets**, **e-mail**,
+**surface tierce**, **plan de remédiation**, persistance, API (historique, exports, jeton, diff,
+plan, verify), CLI, fixture serveur volontairement vulnérable (3 pages, clé AWS factice, source map).
 
 ---
 
 ## Feuille de route
 
+- [x] Plan d'action priorisé (quick / sprint / projet)
+- [x] Chasse aux secrets dans les bundles publics
+- [x] Cartographie des dépendances tierces
 - [ ] Suivi planifié (cron) avec rapport hebdomadaire par e-mail
 - [ ] Règles personnalisées (`*.yaml`) pour les contrôles maison
 - [ ] Comparaison multi-sites (portefeuille)

@@ -230,6 +230,7 @@
           } else if (event.type === "saved") {
             if (currentReport && currentReport.scan_id === event.scan_id) {
               fetchDiff(currentReport);
+              fetchPlan(currentReport);
             }
           } else if (event.type === "error") {
             showError(event.message || "Erreur inconnue.");
@@ -320,7 +321,9 @@
     renderHistory();
     renderVerification(report);
     renderPages(report);
+    renderThirdParties(report);
     $("#diff-panel").hidden = true;
+    fetchPlan(report);
 
     results.scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -1036,6 +1039,88 @@
       button.disabled = false;
       button.querySelector(".btn-label").textContent = "Vérifier maintenant";
     }
+  }
+
+  /* ---------------------------- Plan d'action ----------------------------- */
+
+  async function fetchPlan(report) {
+    const panel = $("#plan-panel");
+    if (!report || !report.scan_id) {
+      panel.hidden = true;
+      return;
+    }
+    try {
+      const response = await fetch(`/api/scans/${report.scan_id}/plan`);
+      if (!response.ok) {
+        panel.hidden = true;
+        return;
+      }
+      renderPlan(await response.json());
+    } catch (_) {
+      panel.hidden = true;
+    }
+  }
+
+  function renderPlan(plan) {
+    const panel = $("#plan-panel");
+    if (!plan || !plan.available) {
+      panel.hidden = true;
+      return;
+    }
+    panel.hidden = false;
+    $("#plan-caption").textContent =
+      `${plan.current_score}/100 → ${plan.projected_score}/100 (+${plan.potential_gain} pts)`;
+
+    const host = $("#plan-cols");
+    host.innerHTML = "";
+    ["quick", "sprint", "project"].forEach((key) => {
+      const bucket = plan.buckets[key];
+      const column = el("div", "plan-col");
+      const title = el("h3", null, bucket.label);
+      title.appendChild(el("span", "plan-count", String(bucket.items.length)));
+      column.appendChild(title);
+      column.appendChild(el("p", "plan-detail", bucket.detail));
+
+      const list = el("ul", "plan-items");
+      if (!bucket.items.length) {
+        list.appendChild(el("li", "empty", "Rien à faire ici 🎉"));
+      }
+      bucket.items.slice(0, 8).forEach((item) => {
+        const li = el("li");
+        const sev = el("span", "diff-sev", item.severity_label);
+        sev.dataset.sev = item.severity;
+        li.appendChild(sev);
+        const body = el("div", "plan-body");
+        body.appendChild(el("strong", null, item.title));
+        if (item.action) body.appendChild(el("em", null, item.action));
+        li.appendChild(body);
+        list.appendChild(li);
+      });
+      column.appendChild(list);
+      host.appendChild(column);
+    });
+  }
+
+  /* ------------------------- Dépendances tierces -------------------------- */
+
+  function renderThirdParties(report) {
+    const panel = $("#third-panel");
+    const list = $("#third-list");
+    const items = report.third_parties || [];
+    list.innerHTML = "";
+    if (!items.length) {
+      panel.hidden = true;
+      return;
+    }
+    panel.hidden = false;
+    $("#third-count").textContent = `${items.length} domaine(s) tiers`;
+    items.slice(0, 15).forEach((item) => {
+      const li = el("li");
+      li.appendChild(el("span", "host", item.host));
+      li.appendChild(el("span", "role", item.role));
+      li.appendChild(el("span", "res", (item.resources || []).join(" · ")));
+      list.appendChild(li);
+    });
   }
 
   /* --------------------------- Pages analysées ---------------------------- */

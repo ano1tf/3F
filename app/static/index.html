@@ -25,7 +25,7 @@
         </svg>
       </span>
       <span class="brand-name">VulnLens</span>
-      <span class="brand-tag">v3.0</span>
+      <span class="brand-tag">v4.0</span>
     </a>
     <nav class="topnav">
       <button class="nav-btn" id="nav-analyzer" type="button" aria-pressed="true">Analyser</button>
@@ -182,6 +182,14 @@
         Aucun constat pour ce filtre. 🌤️
       </p>
 
+      <article class="panel" id="plan-panel" hidden>
+        <div class="panel-head">
+          <h2>Plan d'action</h2>
+          <span class="muted small" id="plan-caption"></span>
+        </div>
+        <div class="plan-cols" id="plan-cols"></div>
+      </article>
+
       <article class="panel" id="diff-panel" hidden>
         <div class="panel-head">
           <h2>Évolution depuis la dernière analyse</h2>
@@ -225,6 +233,18 @@
           <span class="muted small" id="pages-count"></span>
         </div>
         <ul class="pages" id="pages-list"></ul>
+      </article>
+
+      <article class="panel" id="third-panel" hidden>
+        <div class="panel-head">
+          <h2>Dépendances tierces</h2>
+          <span class="muted small" id="third-count"></span>
+        </div>
+        <p class="muted small">
+          Chaque domaine listé voit l'adresse IP de vos visiteurs. Une compromission chez l'un
+          d'eux devient une compromission de votre site.
+        </p>
+        <ul class="third" id="third-list"></ul>
       </article>
 
       <article class="panel" id="history-panel" hidden>

@@ -24,6 +24,7 @@ INDEX_HTML = """<!doctype html>
     <button type="submit">Connexion</button>
   </form>
   <iframe src="https://video.test/embed"></iframe>
+  <script src="/static/app.js"></script>
   <a href="/about">À propos</a>
   <a href="/contact">Contact</a>
   <a href="/logout">Déconnexion</a>
@@ -59,6 +60,19 @@ class BadSiteHandler(BaseHTTPRequestHandler):
             self._send(200, INDEX_HTML)
         elif path == "/about":
             self._send(200, "<html><head><title>À propos</title></head><body><a href='/'>retour</a></body></html>")
+        elif path == "/static/app.js":
+            self._send(
+                200,
+                "const CFG={region:'eu-west-1',key:'AKIAZ7Q2XK4M9PLW3TRV'};\n"
+                "window.API='https://api.test.local/v1';\n",
+                "application/javascript",
+            )
+        elif path == "/static/app.js.map":
+            self._send(
+                200,
+                '{"version":3,"sources":["src/app.ts"],"mappings":"AAAA"}',
+                "application/json",
+            )
         elif path == "/contact":
             self._send(
                 200,
