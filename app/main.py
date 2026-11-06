@@ -24,7 +24,18 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import alerts, config, credentials, db, diffing, remediation, reporting, verify, watch
+from . import (
+    alerts,
+    config,
+    credentials,
+    db,
+    diffing,
+    remediation,
+    reporting,
+    triage,
+    verify,
+    watch,
+)
 from .models import SEVERITY_LABELS_FR
 from .safety import ScanError, normalize_target
 from .scanner.engine import run_scan
@@ -207,6 +218,14 @@ class ScanRequest(BaseModel):
     )
 
 
+class TriageRequest(BaseModel):
+    verdict: Literal["a-verifier", "confirme", "faux-positif", "risque-accepte"] = Field(
+        ...,
+        description="Verdict du pentester sur ce constat.",
+    )
+    note: str = Field("", max_length=triage.MAX_NOTE, description="Justification courte.")
+
+
 def _event(payload: dict) -> str:
     return json.dumps(payload, ensure_ascii=False) + "\n"
 
@@ -296,6 +315,9 @@ async def meta() -> dict:
             "CWE, test OWASP WSTG et score CVSS 3.1 calculé sur chaque constat",
             "Journal des requêtes : annexe de preuve de non-intrusivité (HTML, Markdown, SARIF)",
             "Zone authentifiée optionnelle : en-tête fourni, jamais stocké ni reporté",
+            "Triage des constats : confirmé / faux positif / risque accepté, avec justification",
+            "Score retenu après triage et suppressions SARIF des faux positifs",
+            "Équipe d'agents locale (sans API) : hypothèses d'attaque, revue croisée et chaînes d'exploitation",
             "Impact : ce que chaque faille donne accès (comptes, base, paiements, cloud…)",
             "Surface tierce : domaines chargés, rôles, formulaires qui pointent à l'extérieur",
             "Source maps exposées",
@@ -568,6 +590,64 @@ async def api_delete_scan(scan_id: str) -> dict:
     if not deleted:
         raise HTTPException(status_code=404, detail="Analyse introuvable.")
     return {"deleted": True, "scan_id": scan_id}
+
+
+@app.get("/api/scans/{scan_id}/triage")
+async def api_triage(scan_id: str) -> dict:
+    report = await _report_or_404(scan_id)
+    return {
+        "scan_id": scan_id,
+        "entries": {
+            finding["id"]: {
+                "verdict": finding["verdict"],
+                "label": finding["verdict_label"],
+                "note": finding["verdict_note"],
+                "updated_at": finding.get("verdict_at", ""),
+            }
+            for finding in report.get("findings") or []
+            if finding.get("verdict")
+        },
+        "summary": report.get("triage_summary") or triage.summary(report.get("findings") or []),
+        "score": report.get("score"),
+        "score_after_triage": report.get("score_after_triage"),
+        "grade_after_triage": report.get("grade_after_triage", ""),
+    }
+
+
+@app.put("/api/scans/{scan_id}/findings/{finding_id}/triage")
+async def api_set_triage(scan_id: str, finding_id: str, payload: TriageRequest) -> dict:
+    report = await _report_or_404(scan_id)
+    known = {str(finding.get("id")) for finding in report.get("findings") or []}
+    if finding_id not in known:
+        raise HTTPException(status_code=404, detail="Constat introuvable dans cette analyse.")
+    try:
+        record = triage.entry(payload.verdict, payload.note)
+    except triage.TriageError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    await db.set_triage(scan_id, finding_id, record["verdict"], record["note"], record["updated_at"])
+    updated = await _report_or_404(scan_id)
+    return {
+        "scan_id": scan_id,
+        "finding_id": finding_id,
+        **record,
+        "summary": updated.get("triage_summary") or {},
+        "score_after_triage": updated.get("score_after_triage"),
+        "grade_after_triage": updated.get("grade_after_triage", ""),
+    }
+
+
+@app.delete("/api/scans/{scan_id}/findings/{finding_id}/triage")
+async def api_clear_triage(scan_id: str, finding_id: str) -> dict:
+    report = await _report_or_404(scan_id)
+    entries = await db.clear_triage(scan_id, finding_id)
+    merged = triage.merge(report, entries)
+    return {
+        "scan_id": scan_id,
+        "finding_id": finding_id,
+        "cleared": True,
+        "summary": merged.get("triage_summary") or {},
+    }
 
 
 async def _report_with_diff(scan_id: str) -> dict:

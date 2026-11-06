@@ -132,6 +132,8 @@ class ScanReport:
     requests_summary: dict[str, Any] = field(default_factory=dict)
     auth_used: bool = False
     auth_kind: str = ""
+    # Lecture « red team » produite par l'équipe d'agents (app.agents)
+    attack_plan: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -157,5 +159,6 @@ class ScanReport:
             "requests_summary": self.requests_summary,
             "auth_used": self.auth_used,
             "auth_kind": self.auth_kind,
+            "attack_plan": self.attack_plan,
             "errors": self.errors,
         }

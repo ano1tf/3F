@@ -86,8 +86,7 @@ def to_sarif(report: dict[str, Any]) -> dict[str, Any]:
 
     results = []
     for finding in findings:
-        results.append(
-            {
+        result = {
                 "ruleId": finding["id"],
                 "level": SARIF_LEVEL.get(finding["severity"], "note"),
                 "message": {
@@ -115,9 +114,21 @@ def to_sarif(report: dict[str, Any]) -> dict[str, Any]:
                     "wstg": finding.get("wstg", ""),
                     "cvss": finding.get("cvss", 0.0),
                     "cvss-vector": finding.get("cvss_vector", ""),
+                    "verdict": finding.get("verdict", ""),
+                    "verdict-note": finding.get("verdict_note", ""),
                 },
             }
-        )
+        # Un faux positif écarté par le pentester est supprimé au sens SARIF :
+        # les plateformes (GitHub Code Scanning…) cessent alors de l'afficher.
+        if finding.get("verdict") == "faux-positif":
+            result["suppressions"] = [
+                {
+                    "kind": "external",
+                    "status": "accepted",
+                    "justification": finding.get("verdict_note") or "Écarté après vérification.",
+                }
+            ]
+        results.append(result)
 
     return {
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
@@ -152,6 +163,18 @@ def to_sarif(report: dict[str, Any]) -> dict[str, Any]:
                     "authUsed": bool(report.get("auth_used")),
                     "authKind": report.get("auth_kind", ""),
                     "requests": report.get("requests_summary") or {},
+                    "triage": report.get("triage_summary") or {},
+                    "scoreAfterTriage": report.get("score_after_triage"),
+                    "attackChains": [
+                        {
+                            "id": chain.get("id"),
+                            "title": chain.get("title"),
+                            "score": chain.get("score"),
+                            "impact": chain.get("impact", []),
+                            "techniques": chain.get("techniques", []),
+                        }
+                        for chain in (report.get("attack_plan") or {}).get("chains") or []
+                    ],
                 },
             }
         ],
@@ -163,7 +186,13 @@ def to_markdown(report: dict[str, Any]) -> str:
     lines = [
         f"# Rapport VulnLens — {report.get('final_url') or report.get('target')}",
         "",
-        f"- **Score** : {report.get('score')}/100 (note {report.get('grade')})",
+        f"- **Score** : {report.get('score')}/100 (note {report.get('grade')})"
+        + (
+            f" — après triage : {report['score_after_triage']}/100 "
+            f"(note {report.get('grade_after_triage') or '?'})"
+            if report.get("score_after_triage") is not None
+            else ""
+        ),
         f"- **Cible** : {report.get('final_url') or report.get('target')}",
         f"- **Date** : {report.get('started_at', '')}",
         f"- **Durée** : {report.get('duration_ms', 0)} ms",
@@ -200,6 +229,63 @@ def to_markdown(report: dict[str, Any]) -> str:
             lines.append("### Ce que l'attaquant peut atteindre")
             lines += [f"- {item}" for item in executive["reachable"]]
             lines.append("")
+
+
+    plan_agents = report.get("attack_plan") or {}
+    if plan_agents.get("available") and plan_agents.get("chains"):
+        lines += ["## Lecture red team — chaînes d'attaque", ""]
+        lines.append(plan_agents.get("narrative", ""))
+        lines.append("")
+        for chain in plan_agents["chains"]:
+            lines.append(
+                f"### {chain.get('title')} — score {chain.get('score')} "
+                f"(confiance {chain.get('confidence', 0):.0%}, difficulté {chain.get('difficulty', '')})"
+            )
+            lines.append(f"_{chain.get('summary', '')}_")
+            lines.append("")
+            for step_index, step in enumerate(chain.get("steps") or [], start=1):
+                techniques = ", ".join(step.get("techniques") or [])
+                lines.append(
+                    f"{step_index}. **{step.get('stage_label', '')}** — {step.get('claim', '')} "
+                    f"({step.get('confidence', 0):.0%}{', ' + techniques if techniques else ''})"
+                )
+            lines.append(f"**Impact** : {' · '.join(chain.get('impact') or [])}")
+            lines.append("")
+        if plan_agents.get("next_steps"):
+            lines.append("### Vérifications manuelles à mener")
+            lines += [
+                f"- {item['action']} _(confiance {item['confidence']})_"
+                for item in plan_agents["next_steps"]
+            ]
+            lines.append("")
+        lines.append(f"> {plan_agents.get('doctrine', '')}")
+        lines.append("")
+
+    triage_summary = report.get("triage_summary") or {}
+    if triage_summary.get("triaged"):
+        counts_triage = triage_summary.get("counts") or {}
+        detail = " · ".join(
+            f"{value} {label.lower()}"
+            for key, label in (
+                ("confirme", "Confirmé(s)"),
+                ("faux-positif", "Faux positif(s)"),
+                ("risque-accepte", "Risque accepté"),
+                ("a-verifier", "À vérifier"),
+            )
+            for value in [counts_triage.get(key, 0)]
+            if value
+        )
+        lines += ["## Triage", ""]
+        lines.append(
+            f"- {triage_summary.get('triaged', 0)} constat(s) trié(s) sur "
+            f"{triage_summary.get('total', 0)} : {detail}."
+        )
+        if report.get("score_after_triage") is not None:
+            lines.append(
+                f"- Score retenu après triage : **{report['score_after_triage']}/100** "
+                f"(note {report.get('grade_after_triage', '?')})."
+            )
+        lines.append("")
 
     plan = remediation.build_plan(report)
     if plan["available"]:
@@ -281,6 +367,9 @@ def to_markdown(report: dict[str, Any]) -> str:
             lines += [f"**Ce que ça révèle :** {finding['reveals']}", ""]
         if finding.get("grants"):
             lines += [f"**Donne accès à :** {' · '.join(finding['grants'])}", ""]
+        if finding.get("verdict"):
+            note = f" — « {finding['verdict_note']} »" if finding.get("verdict_note") else ""
+            lines += [f"**Verdict :** {finding.get('verdict_label', '')}{note}", ""]
         if finding.get("evidence"):
             lines += ["```", finding["evidence"], "```", ""]
         if finding.get("remediation"):
@@ -436,6 +525,16 @@ def to_html(report: dict[str, Any]) -> str:
             if standard_line
             else ""
         )
+        if finding.get("verdict"):
+            note = finding.get("verdict_note") or ""
+            note_html = f' « {_e(note)} »' if note else ""
+            verdict_html = (
+                f'<p class="verdict-line"><span class="verdict-chip" '
+                f'data-verdict="{_e(finding["verdict"])}">'
+                f'{_e(finding.get("verdict_label", ""))}</span>{note_html}</p>'
+            )
+        else:
+            verdict_html = ""
         findings_html.append(
             f"""
         <article class="finding" style="border-left-color:{color}">
@@ -449,6 +548,7 @@ def to_html(report: dict[str, Any]) -> str:
             {f'<span class="conf">{_e("à vérifier" if finding.get("confidence") == "probable" else "à confirmer")}</span>' if finding.get("confidence") not in (None, "certain") else ""}
           </header>
           <p class="desc">{_e(finding.get("description", ""))}</p>
+          {verdict_html}
           {f'''<div class="find-danger">{_danger_meter(finding.get("danger", 0), finding.get("danger_label", ""))}</div>
           <div class="block"><h4>Comment y arriver</h4><ol class="sit-steps">{"".join(f"<li>{_e(step)}</li>" for step in finding.get("access") or [])}</ol></div>
           <div class="block"><h4>Ce que ça révèle</h4><p class="sit-reveals">{_e(finding.get("reveals", ""))}</p>{f'<p class="sit-grants"><strong>Donne accès à :</strong> {_e(" · ".join(finding["grants"]))}</p>' if finding.get("grants") else ""}</div>''' if finding.get("danger") else ""}
@@ -543,6 +643,38 @@ def to_html(report: dict[str, Any]) -> str:
   <h2>Pages analysées ({len(pages)})</h2>
   <div class="panel"><ul class="pages">{rows}</ul></div>'''
 
+
+    triage_summary = report.get("triage_summary") or {}
+    triage_html = ""
+    if triage_summary.get("triaged"):
+        counts_triage = triage_summary.get("counts") or {}
+        chips = "".join(
+            f'<li class="verdict-pill" data-verdict="{key}">{label} : '
+            f'<strong>{count}</strong></li>'
+            for key, label, count in (
+                ("confirme", "Confirmés", counts_triage.get("confirme", 0)),
+                ("faux-positif", "Faux positifs", counts_triage.get("faux-positif", 0)),
+                ("risque-accepte", "Risque accepté", counts_triage.get("risque-accepte", 0)),
+                ("a-verifier", "À vérifier", counts_triage.get("a-verifier", 0)),
+            )
+            if count
+        )
+        score_triage = report.get("score_after_triage")
+        score_html = (
+            f'<p class="triage-score">Score retenu après triage : '
+            f'<strong>{score_triage}/100</strong> '
+            f'(note {_e(report.get("grade_after_triage", "?"))})</p>'
+            if score_triage is not None
+            else ""
+        )
+        triage_html = f"""  <h2>Triage</h2>
+  <div class="panel">
+    <p class="meta">{triage_summary.get('triaged', 0)} constat(s) trié(s) sur {triage_summary.get('total', 0)}.</p>
+    <ul class="triage-pills">{chips}</ul>
+    {score_html}
+  </div>
+"""
+
     plan = remediation.build_plan(report)
 
     plan_html = ""
@@ -626,6 +758,67 @@ def to_html(report: dict[str, Any]) -> str:
             "ce qu'elles révèlent, et une cotation de 1 à 10.</p>"
             f'<div class="situation-grid">{"".join(cards)}</div>'
         )
+
+    plan_agents = report.get("attack_plan") or {}
+    agents_html = ""
+    if plan_agents.get("available") and plan_agents.get("chains"):
+        cards = []
+        for chain in plan_agents["chains"]:
+            steps = "".join(
+                f'<li><span class="stage">{_e(step.get("stage_label", ""))}</span>'
+                f'<span class="claim">{_e(step.get("claim", ""))}</span>'
+                f'<span class="conf" title="Confiance de l\'hypothèse">'
+                f'{step.get("confidence", 0):.0%}</span>'
+                f'<em class="mitre">{_e(", ".join(step.get("techniques") or []))}</em></li>'
+                for step in chain.get("steps") or []
+            )
+            impact = "".join(
+                f'<span class="asset-chip">{_e(asset)}</span>' for asset in chain.get("impact") or []
+            )
+            cards.append(
+                f'<article class="chain-card">'
+                f'<header><h3>{_e(chain.get("title", ""))}</h3>'
+                f'<span class="chain-score">{chain.get("score")}/10</span></header>'
+                f'<p class="chain-summary">{_e(chain.get("summary", ""))}</p>'
+                f'<ol class="chain-steps">{steps}</ol>'
+                f'<p class="chain-meta">Difficulté {_e(chain.get("difficulty", ""))} · '
+                f'confiance {chain.get("confidence", 0):.0%} · '
+                f'{len(chain.get("steps") or [])} étape(s)</p>'
+                f'<p class="chain-impact">{impact}</p>'
+                f"</article>"
+            )
+        next_steps = "".join(
+            f'<li>{_e(item.get("action", ""))} '
+            f'<em>(confiance {_e(item.get("confidence", ""))})</em></li>'
+            for item in plan_agents.get("next_steps") or []
+        )
+        dissent = "".join(
+            f'<li><code>{_e(item.get("hypothesis", ""))}</code> — {_e(item.get("reason", ""))}</li>'
+            for item in plan_agents.get("dissent") or []
+        )
+        trace = "".join(
+            f'<li><span class="who">{_e(entry.get("agent", ""))}</span> {_e(entry.get("message", ""))}</li>'
+            for entry in (plan_agents.get("trace") or [])[:60]
+        )
+        details = ""
+        if dissent or trace:
+            details = (
+                '<details><summary>Délibération de l\'équipe</summary>'
+                + (f'<h4>Hypothèses écartées</h4><ul class="dissent">{dissent}</ul>' if dissent else "")
+                + (f'<h4>Journal</h4><ul class="trace">{trace}</ul>' if trace else "")
+                + "</details>"
+            )
+        agents_html = f"""
+  <h2>Équipe red team — chaînes d'attaque</h2>
+  <p class="sit-intro">{_e(plan_agents.get("narrative", ""))}</p>
+  <div class="chains">{"".join(cards)}</div>
+  <div class="panel">
+    <h3>Vérifications manuelles à mener</h3>
+    <ol class="next-steps">{next_steps}</ol>
+    {details}
+    <p class="doctrine">{_e(plan_agents.get("doctrine", ""))}</p>
+  </div>
+"""
 
     third_html = ""
     if report.get("third_parties"):
@@ -738,6 +931,37 @@ def to_html(report: dict[str, Any]) -> str:
          color:#0b4f6c; background:#eef7fb; border:1px solid #cfe6f0; border-radius:4px;
          padding:2px 6px; white-space:nowrap; }}
   .req-summary {{ margin:6px 0 10px; padding-left:18px; font-size:12.5px; color:#334155; }}
+  .triage-pills {{ list-style:none; display:flex; flex-wrap:wrap; gap:8px; padding:0; margin:6px 0 0; }}
+  .verdict-pill, .verdict-chip {{ border-radius:999px; padding:3px 10px; font-size:11.5px; font-weight:700;
+        border:1px solid #cbd5e1; background:#f1f5f9; color:#334155; }}
+  .verdict-pill[data-verdict="confirme"], .verdict-chip[data-verdict="confirme"] {{ background:#e6f6ee; border-color:#a7e0c3; color:#0f6b45; }}
+  .verdict-pill[data-verdict="faux-positif"], .verdict-chip[data-verdict="faux-positif"] {{ background:#f4f4f5; border-color:#d4d4d8; color:#52525b; }}
+  .verdict-pill[data-verdict="risque-accepte"], .verdict-chip[data-verdict="risque-accepte"] {{ background:#fef3e2; border-color:#f3d19b; color:#8a5a12; }}
+  .verdict-line {{ margin:6px 0 0; font-size:12.5px; color:#475569; }}
+  .chains {{ display:grid; gap:12px; margin:10px 0 18px; }}
+  .chain-card {{ border:1px solid #e2e8f0; border-left:4px solid #0ea5b7; border-radius:10px;
+                 padding:12px 16px; background:#fff; box-shadow:0 1px 2px rgba(15,23,42,.05); }}
+  .chain-card header {{ display:flex; align-items:baseline; gap:10px; }}
+  .chain-card h3 {{ margin:0; font-size:15px; }}
+  .chain-score {{ margin-left:auto; font-weight:800; color:#0b4f6c; }}
+  .chain-summary {{ margin:6px 0 8px; font-size:12.5px; color:#475569; }}
+  .chain-steps {{ list-style:none; padding:0; margin:0 0 8px; display:grid; gap:6px; }}
+  .chain-steps li {{ display:grid; grid-template-columns:130px 1fr 46px; gap:10px;
+                     align-items:baseline; font-size:12.5px; padding:6px 0;
+                     border-top:1px dashed #e2e8f0; }}
+  .chain-steps .stage {{ font-weight:700; color:#0b4f6c; font-size:11.5px; text-transform:uppercase; letter-spacing:.03em; }}
+  .chain-steps .conf {{ text-align:right; font-weight:700; color:#0f766e; }}
+  .chain-steps .mitre {{ grid-column:2 / 4; color:#94a3b8; font-size:11px; font-style:normal; }}
+  .chain-meta {{ margin:0 0 6px; font-size:11.5px; color:#94a3b8; }}
+  .chain-impact {{ margin:0; display:flex; flex-wrap:wrap; gap:6px; }}
+  .asset-chip {{ background:#eef7fb; border:1px solid #cfe6f0; color:#0b4f6c; border-radius:999px;
+                 padding:2px 9px; font-size:11px; font-weight:600; }}
+  .next-steps {{ margin:6px 0 10px; padding-left:18px; font-size:12.5px; color:#334155; }}
+  .next-steps em {{ color:#94a3b8; font-style:normal; }}
+  .dissent, .trace {{ font-size:11.5px; color:#64748b; padding-left:18px; margin:4px 0 10px; }}
+  .trace .who {{ font-weight:700; color:#0b4f6c; }}
+  .doctrine {{ margin:10px 0 0; font-size:11.5px; color:#64748b; border-left:3px solid #cbd5e1; padding-left:10px; }}
+  .triage-score {{ margin:8px 0 0; font-size:13px; color:#0b4f6c; }}
   .req-summary .ok {{ color:#0f766e; font-weight:600; }}
   .req-summary .warn {{ color:#b45309; font-weight:600; }}
   details summary {{ cursor:pointer; font-size:12.5px; font-weight:600; color:#0b4f6c; }}
@@ -831,10 +1055,13 @@ def to_html(report: dict[str, Any]) -> str:
 
   <div class="cells">{summary_cells}</div>
 
+  {triage_html}
+
   {f'<h2>À corriger en priorité</h2><div class="panel"><ol class="priority">{priority_html}</ol></div>' if priority_html else ""}
 
   {executive_html}
 {situation_html}
+{agents_html}
 {plan_html}
 {diff_html}
 {pages_html}

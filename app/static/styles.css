@@ -1296,3 +1296,66 @@ ol.access li { margin: 5px 0; }
                     border: 1px solid var(--border, #24344b); background: rgba(255,255,255,0.03);
                     color: inherit; font-family: var(--mono, ui-monospace, monospace); font-size: 12.5px; }
 .auth-block input:focus { outline: 2px solid rgba(34,211,238,0.4); outline-offset: 1px; }
+
+/* Triage des constats */
+.triage-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
+  margin: 14px 0 6px; padding: 10px 14px; border-radius: 10px;
+  border: 1px solid var(--border, #24344b); background: rgba(255, 255, 255, 0.03);
+  font-size: 12.5px; color: var(--muted);
+}
+.triage-counts { font-weight: 600; color: #d7e6f5; }
+.triage-score { color: #7fd7f2; font-weight: 600; }
+.triage-hide { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; margin-left: auto; }
+.triage-row { display: grid; grid-template-columns: 170px 1fr auto; gap: 10px; align-items: center; }
+.triage-row select, .triage-row input {
+  padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border, #24344b);
+  background: rgba(255, 255, 255, 0.04); color: inherit; font-size: 12.5px;
+}
+.verdict-state { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+.verdict-chip {
+  font-size: 10.5px; font-weight: 700; border-radius: 999px; padding: 2px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18); white-space: nowrap;
+}
+.verdict-chip[data-verdict="confirme"] { color: #34d399; border-color: rgba(52, 211, 153, 0.45); }
+.verdict-chip[data-verdict="faux-positif"] { color: #9aa7b8; border-color: rgba(154, 167, 184, 0.4); }
+.verdict-chip[data-verdict="risque-accepte"] { color: #fbbf24; border-color: rgba(251, 191, 36, 0.45); }
+@media (max-width: 720px) { .triage-row { grid-template-columns: 1fr; } }
+
+/* Équipe d'agents — chaînes d'attaque */
+.chains { display: grid; gap: 12px; margin-top: 12px; }
+.chain-card {
+  border: 1px solid var(--border, #24344b);
+  border-left: 3px solid #22d3ee;
+  border-radius: 10px;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.chain-card header { display: flex; align-items: baseline; gap: 10px; }
+.chain-card h3 { margin: 0; font-size: 15px; }
+.chain-score { margin-left: auto; font-weight: 800; color: #7fd7f2; }
+.chain-summary { margin: 6px 0 8px; font-size: 12.5px; color: var(--muted); }
+.chain-steps { list-style: none; padding: 0; margin: 0 0 8px; display: grid; gap: 6px; }
+.chain-steps li {
+  display: grid; grid-template-columns: 128px 1fr 52px; gap: 10px;
+  align-items: baseline; font-size: 12.5px; padding: 6px 0;
+  border-top: 1px dashed var(--border, #24344b);
+}
+.chain-steps .stage {
+  font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em;
+  color: #7fd7f2;
+}
+.chain-steps .conf { text-align: right; font-weight: 700; color: #34d399; }
+.chain-steps .mitre { grid-column: 2 / 4; color: var(--muted); font-size: 11px; font-style: normal; }
+.chain-meta { margin: 0 0 6px; font-size: 11.5px; color: var(--muted); }
+.chain-impact { margin: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.asset-chip {
+  background: rgba(34, 211, 238, 0.1); border: 1px solid rgba(34, 211, 238, 0.3);
+  color: #bde9f7; border-radius: 999px; padding: 2px 9px; font-size: 11px; font-weight: 600;
+}
+.next-steps { margin: 8px 0 10px; padding-left: 18px; font-size: 12.5px; }
+.next-steps em { color: var(--muted); font-style: normal; }
+.doctrine {
+  margin: 10px 0 0; font-size: 11.5px; color: var(--muted);
+  border-left: 3px solid var(--border, #24344b); padding-left: 10px;
+}

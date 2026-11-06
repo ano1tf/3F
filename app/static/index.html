@@ -25,7 +25,7 @@
         </svg>
       </span>
       <span class="brand-name">VulnLens</span>
-      <span class="brand-tag">v6.4</span>
+      <span class="brand-tag">v6.6</span>
     </a>
     <nav class="topnav">
       <button class="nav-btn" id="nav-analyzer" type="button" aria-pressed="true">Analyser</button>
@@ -170,6 +170,13 @@
             </p>
           </div>
         </div>
+        <div class="triage-bar" id="triage-bar" hidden>
+          <span class="triage-counts" id="triage-counts"></span>
+          <span class="triage-score" id="triage-score"></span>
+          <label class="triage-hide">
+            <input type="checkbox" id="hide-false-positives" /> Masquer les faux positifs
+          </label>
+        </div>
         <div class="summary-right">
           <div class="severity-grid" id="severity-grid"></div>
           <div class="sev-ribbon" id="sev-ribbon" role="img" aria-label="Répartition des constats par sévérité"></div>
@@ -230,6 +237,20 @@
           Technique <span class="tab-count" id="tab-count-technique"></span>
         </button>
       </div>
+
+      <article class="panel" id="agents-panel" data-tab="situation" hidden>
+        <div class="panel-head">
+          <h2>Équipe red team — chaînes d'attaque</h2>
+          <span class="muted small" id="agents-stats"></span>
+        </div>
+        <p class="muted small" id="agents-narrative"></p>
+        <div class="chains" id="agents-chains"></div>
+        <details id="agents-details" hidden>
+          <summary>Prochaines vérifications manuelles</summary>
+          <ol class="next-steps" id="agents-next"></ol>
+          <p class="doctrine" id="agents-doctrine"></p>
+        </details>
+      </article>
 
       <article class="panel" id="situation-panel" data-tab="situation" hidden>
         <div class="panel-head">
@@ -487,6 +508,7 @@
           <span class="finding-cat"></span>
         </span>
         <span class="std-chip" hidden></span>
+        <span class="verdict-chip" hidden></span>
         <span class="confidence" hidden></span>
         <span class="danger-chip" hidden></span>
         <span class="sev-badge"></span>
@@ -515,6 +537,20 @@
         <div class="block remediation">
           <h3>Remédiation</h3>
           <p class="finding-fix"></p>
+        </div>
+        <div class="block triage-controls" hidden>
+          <h3>Verdict du pentester</h3>
+          <div class="triage-row">
+            <select class="verdict-select" aria-label="Verdict sur ce constat">
+              <option value="a-verifier">À vérifier</option>
+              <option value="confirme">Confirmé</option>
+              <option value="faux-positif">Faux positif</option>
+              <option value="risque-accepte">Risque accepté</option>
+            </select>
+            <input class="verdict-note" type="text" maxlength="500"
+                   placeholder="Justification (reprise dans le rapport client)" />
+            <span class="verdict-state" aria-live="polite"></span>
+          </div>
         </div>
         <div class="finding-footer">
           <a class="reference" target="_blank" rel="noopener noreferrer">Documentation ↗</a>
