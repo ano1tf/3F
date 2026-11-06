@@ -9,7 +9,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from urllib.parse import urlsplit, urlunsplit
 
-from .. import attack, config, narrative, verify
+from .. import attack, config, credentials, narrative, standards, verify
 from ..models import CheckResult, Finding, ScanReport
 from ..safety import ScanError, validate_target
 from . import (
@@ -42,7 +42,7 @@ Emitter = Callable[[dict], Awaitable[None]]
 
 PROFILES: dict[str, dict] = {
     "quick": {"pages": 1, "deep": False, "scripts": 3, "email": False, "label": "Rapide"},
-    "standard": {"pages": 6, "deep": False, "scripts": 6, "email": True, "label": "Standard"},
+    "standard": {"pages": 8, "deep": False, "scripts": 8, "email": True, "label": "Standard"},
     "deep": {"pages": 12, "deep": True, "scripts": 10, "email": True, "label": "Approfondi"},
 }
 
@@ -85,7 +85,14 @@ async def run_scan(
     raw_target: str,
     emit: Emitter,
     profile: str = "quick",
+    auth: tuple[str, str] | None = None,
 ) -> ScanReport:
+    """Analyse une cible de façon passive.
+
+    `auth` : couple (nom d'en-tête, valeur) fourni par le pentester pour couvrir
+    la zone authentifiée. Il n'est envoyé qu'à l'hôte analysé et n'apparaît
+    jamais dans le rapport (seul `auth_used` / `auth_kind` sont conservés).
+    """
     started = time.perf_counter()
     selected = PROFILES.get(profile, PROFILES["quick"])
     report = ScanReport(
@@ -128,7 +135,15 @@ async def run_scan(
     findings: list[Finding] = []
     checks: list[CheckResult] = []
 
-    async with Fetcher(allow_private=config.ALLOW_PRIVATE_TARGETS) as fetcher:
+    report.auth_used = auth is not None
+    if auth is not None:
+        report.auth_kind = credentials.kind_for(*auth)
+
+    async with Fetcher(
+        allow_private=config.ALLOW_PRIVATE_TARGETS,
+        auth=auth,
+        auth_host=urlsplit(target.url).netloc,
+    ) as fetcher:
         # ------------------------------------------------------------------
         # Phase 1 — transport
         # ------------------------------------------------------------------
@@ -511,6 +526,15 @@ async def run_scan(
             finding.skill = data["skill"]
             finding.grants = data.get("grants", [])
             finding.grants_text = data.get("grants_text", "")
+            standard = standards.for_finding(finding.id)
+            if standard is not None:
+                finding.cwe = standard.cwe
+                finding.cwe_name = standard.cwe_name
+                finding.wstg = standard.wstg
+                finding.cvss = standard.cvss
+                finding.cvss_vector = standard.vector
+        report.requests = list(fetcher.log)
+        report.requests_summary = fetcher.summary()
         report.duration_ms = int((time.perf_counter() - started) * 1000)
         report.executive = narrative.build(report.to_dict())
 

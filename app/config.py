@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 APP_NAME = "VulnLens"
-APP_VERSION = "6.3.0"
+APP_VERSION = "6.4.0"
 APP_TAGLINE = "Scanner de vulnérabilités web — en un clic"
 
 # Identité envoyée aux cibles scannées (transparence : on ne se cache pas).
@@ -18,6 +18,8 @@ TOOL_CONTACT = os.getenv("VULNLENS_CONTACT", "security@example.org")
 # Réseau
 HTTP_TIMEOUT = float(os.getenv("VULNLENS_TIMEOUT", "12"))
 MAX_REDIRECTS = 5
+# Journal des requêtes joint au rapport (annexe d'un pentest)
+MAX_REQUEST_LOG = 2000
 MAX_BODY_BYTES = 1_200_000
 PATH_PROBE_CONCURRENCY = 5
 MAX_CONCURRENT_SCANS = int(os.getenv("VULNLENS_MAX_SCANS", "1"))

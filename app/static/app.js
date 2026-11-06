@@ -203,7 +203,13 @@
       const response = await fetch("/api/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: target, authorized: true, profile: selectedProfile() }),
+        body: JSON.stringify({
+          url: target,
+          authorized: true,
+          profile: selectedProfile(),
+          // Jamais mémorisé : le champ n'est lu qu'au moment de l'envoi.
+          ...(($("#auth") && $("#auth").value.trim()) ? { auth: $("#auth").value.trim() } : {}),
+        }),
       });
 
       if (!response.ok) {
@@ -333,6 +339,7 @@
     renderBreakdown(report);
     renderFingerprint(report.fingerprint || {});
     renderChecks(report.checks || []);
+    renderRequests(report);
 
     if (!options.fromHistory) {
       saveToHistory(report);
@@ -475,6 +482,16 @@
         grantsBlock.hidden = true;
       }
 
+      const stdChip = $(".std-chip", node);
+      const stdLine = [finding.cwe, finding.wstg, finding.cvss ? `CVSS ${finding.cvss}` : ""]
+        .filter(Boolean)
+        .join(" · ");
+      if (stdLine) {
+        stdChip.hidden = false;
+        stdChip.textContent = stdLine;
+        stdChip.title = finding.cvss_vector || "";
+      }
+
       const confidence = $(".confidence", node);
       if (finding.confidence && finding.confidence !== "certain") {
         confidence.hidden = false;
@@ -561,6 +578,65 @@
     });
   }
 
+
+  /* --------------------------- Journal des requêtes ----------------------- */
+
+  function renderRequests(report) {
+    const panel = $("#requests-panel");
+    const summary = report.requests_summary || {};
+    if (!panel) return;
+    if (!summary.total) {
+      panel.hidden = true;
+      return;
+    }
+    panel.hidden = false;
+    $("#requests-total").textContent = `${summary.total} requête${summary.total > 1 ? "s" : ""}`;
+
+    const list = $("#requests-summary");
+    list.innerHTML = "";
+    const methods = Object.entries(summary.by_method || {})
+      .map(([method, count]) => `${count} ${method}`)
+      .join(", ");
+    list.appendChild(el("li", null, `${summary.total} requête(s) : ${methods}`));
+    list.appendChild(
+      el("li", null, `${summary.blocked || 0} tentative(s) bloquée(s) par le garde-fou SSRF`)
+    );
+    const readOnly = el(
+      "li",
+      summary.read_only ? "ok" : "warn",
+      summary.read_only
+        ? "Aucune méthode d'écriture (POST, PUT, PATCH, DELETE) : confirmé."
+        : "Des méthodes autres que la lecture ont été utilisées : vérifiez le journal."
+    );
+    list.appendChild(readOnly);
+    const hosts = Object.entries(summary.by_host || {});
+    if (hosts.length) {
+      list.appendChild(el("li", null, `Hôtes contactés : ${hosts.map(([h, c]) => `${h} (${c})`).join(", ")}`));
+    }
+    if (report.auth_used) {
+      list.appendChild(
+        el("li", null, `Scan authentifié (${report.auth_kind || "en-tête"}) : l'en-tête n'est envoyé qu'à l'hôte analysé et n'est jamais écrit dans le rapport.`)
+      );
+    }
+
+    const details = $("#requests-details");
+    const log = $("#request-log");
+    const entries = report.requests || [];
+    log.innerHTML = "";
+    if (!entries.length) {
+      details.hidden = true;
+      return;
+    }
+    details.hidden = false;
+    entries.slice(0, 150).forEach((entry) => {
+      const line = el("div", "req-line");
+      line.appendChild(el("span", "req-method", entry.method));
+      line.appendChild(el("span", "req-url", entry.url));
+      line.appendChild(el("span", "req-status", String(entry.status)));
+      line.appendChild(el("span", "req-ms", `${entry.ms} ms`));
+      log.appendChild(line);
+    });
+  }
 
   /* ------------------------- Priorités & composition ---------------------- */
 
@@ -804,6 +880,10 @@
     return [
       `[${finding.severity_label || severityLabel(finding.severity)}] ${finding.title}`,
       `Catégorie : ${finding.category}`,
+      finding.cwe
+        ? `${[finding.cwe, finding.wstg, finding.cvss ? `CVSS ${finding.cvss}` : ""].filter(Boolean).join(" · ")}`
+        : "",
+      finding.cvss_vector ? finding.cvss_vector : "",
       "",
       finding.description,
       "",

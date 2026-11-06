@@ -24,7 +24,7 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import alerts, config, db, diffing, remediation, reporting, verify, watch
+from . import alerts, config, credentials, db, diffing, remediation, reporting, verify, watch
 from .models import SEVERITY_LABELS_FR
 from .safety import ScanError, normalize_target
 from .scanner.engine import run_scan
@@ -196,6 +196,15 @@ class ScanRequest(BaseModel):
         "quick",
         description="`quick` : contrôles passifs standards. `deep` : + AXFR, sous-domaines, redirections ouvertes.",
     )
+    auth: str | None = Field(
+        None,
+        max_length=4100,
+        description=(
+            "En-tête d'authentification optionnel pour couvrir la zone connectée, "
+            "au format « Authorization: Bearer … » ou « Cookie: session=… ». "
+            "Jamais stocké ni reporté : envoyé au seul hôte analysé."
+        ),
+    )
 
 
 def _event(payload: dict) -> str:
@@ -284,6 +293,9 @@ async def meta() -> dict:
             "Configuration exposée : état Terraform, clés SSH/GCP, heap dump, profiler Symfony",
             "En-têtes de débogage : profiler de framework actif en production",
             "Contrôle d'accès : IDOR/BOLA, champs cachés, paramètres de privilège, chemins",
+            "CWE, test OWASP WSTG et score CVSS 3.1 calculé sur chaque constat",
+            "Journal des requêtes : annexe de preuve de non-intrusivité (HTML, Markdown, SARIF)",
+            "Zone authentifiée optionnelle : en-tête fourni, jamais stocké ni reporté",
             "Impact : ce que chaque faille donne accès (comptes, base, paiements, cloud…)",
             "Surface tierce : domaines chargés, rôles, formulaires qui pointent à l'extérieur",
             "Source maps exposées",
@@ -299,6 +311,7 @@ async def meta() -> dict:
             "Aucun test d'injection, de force brute ou de déni de service",
             "Les cibles internes (localhost, réseau privé) sont refusées",
             "Analyses limitées en débit et en durée",
+            "L'en-tête d'authentification n'est envoyé qu'à l'hôte analysé et jamais écrit dans le rapport",
         ],
     }
 
@@ -314,6 +327,13 @@ async def scan(payload: ScanRequest, request: Request) -> StreamingResponse:
         target = normalize_target(payload.url)
     except ScanError as exc:
         raise HTTPException(status_code=400, detail=exc.message) from exc
+
+    parsed_auth: tuple[str, str] | None = None
+    if payload.auth:
+        try:
+            parsed_auth = credentials.parse(payload.auth)
+        except credentials.AuthHeaderError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     _check_rate_limit(_client_key(request))
 
@@ -337,7 +357,7 @@ async def scan(payload: ScanRequest, request: Request) -> StreamingResponse:
         async with _SEMAPHORE:
             task = asyncio.create_task(
                 asyncio.wait_for(
-                    run_scan(target, emit, profile=payload.profile),
+                    run_scan(target, emit, profile=payload.profile, auth=parsed_auth),
                     timeout=config.SCAN_DEADLINE_SECONDS,
                 )
             )

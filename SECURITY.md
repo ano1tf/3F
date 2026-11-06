@@ -296,13 +296,27 @@ docker run -p 127.0.0.1:8000:8000 -e VULNLENS_TOKEN -e VULNLENS_TRUST_PROXY vuln
 
 ```bash
 .venv/bin/python -m pytest tests/test_security.py -v   # 30 tests de durcissement
-.venv/bin/python -m pytest                             # 247 tests
+.venv/bin/python -m pytest                             # 325 tests
 .venv/bin/ruff check .
 npm run ui:check                                       # interface, sans erreur JS
 ```
 
 Les tests `test_redirect_to_*` montent de vrais serveurs HTTP locaux : ils prouvent que la
 redirection est refusée **et** que le service interne ne reçoit aucune requête.
+
+## Secret d'authentification (v6.4)
+
+Le scan de la zone connectée manipule un vrai secret : un jeton ou un cookie de session.
+Traitement retenu, vérifié par `tests/test_credentials.py` :
+
+| Risque | Mesure |
+|---|---|
+| Envoi à un domaine tiers | L'en-tête n'est injecté que si l'hôte de la requête est **exactement** celui de la cible. Un `302` vers un autre hôte repart sans lui (test dédié avec deux serveurs). |
+| Fuite dans le rapport | Seuls `auth_used` et `auth_kind` (`bearer`, `cookie`…) sont conservés. Un test sérialise le rapport complet et vérifie que le jeton n'y figure pas. |
+| Fuite dans le journal | Le journal n'enregistre que méthode, URL **sans chaîne de requête**, statut et durée. |
+| Injection d'en-têtes | Retours à la ligne et NUL refusés ; nom en liste blanche (`Authorization`, `Cookie`, `X-Api-Key`…) ; valeur bornée à 4 096 caractères. |
+| Fuite par l'historique | L'API et la CLI ne persistent jamais l'en-tête ; la CLI accepte `--auth-env` pour éviter la ligne de commande. |
+| Fuite via les logs HTTP | Le client `httpx` est créé sans `logger` applicatif ; aucune trace du corps ou des en-têtes d'authentification. |
 
 ## Signaler une vulnérabilité
 

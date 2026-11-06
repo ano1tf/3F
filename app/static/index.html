@@ -25,7 +25,7 @@
         </svg>
       </span>
       <span class="brand-name">VulnLens</span>
-      <span class="brand-tag">v6.3</span>
+      <span class="brand-tag">v6.4</span>
     </a>
     <nav class="topnav">
       <button class="nav-btn" id="nav-analyzer" type="button" aria-pressed="true">Analyser</button>
@@ -86,7 +86,7 @@
             <input type="radio" name="profile" value="standard" />
             <span class="profile-box">
               <span class="profile-name">Standard</span>
-              <span class="profile-detail">Jusqu'à 6 pages, en-têtes et contenu agrégés</span>
+              <span class="profile-detail">Jusqu'à 8 pages, en-têtes et contenu agrégés</span>
             </span>
           </label>
           <label class="profile-option">
@@ -97,6 +97,17 @@
             </span>
           </label>
         </fieldset>
+
+        <details class="auth-block">
+          <summary>Zone authentifiée (optionnel)</summary>
+          <label class="sr-only" for="auth">En-tête d'authentification</label>
+          <input id="auth" type="password" autocomplete="off" spellcheck="false"
+                 placeholder="Authorization: Bearer … ou Cookie: session=…" />
+          <p class="muted small">
+            Envoyé au seul hôte analysé, jamais enregistré ni inclus dans le rapport.
+            À n'utiliser que sur une cible que vous êtes autorisé à tester.
+          </p>
+        </details>
 
         <p id="target-hint" class="hint">
           Domaine ou URL complète. L'outil refuse les adresses internes (localhost, 10.x, 192.168.x).
@@ -303,6 +314,22 @@
         </article>
       </div>
 
+      <article class="panel" id="requests-panel" data-tab="technique" hidden>
+        <div class="panel-head">
+          <h2>Journal des requêtes</h2>
+          <span class="muted small" id="requests-total"></span>
+        </div>
+        <p class="muted small">
+          Preuve de non-intrusivité : tout le trafic émis pendant l'analyse, méthode par méthode.
+          L'export HTML et le Markdown contiennent le journal détaillé (annexe du rapport).
+        </p>
+        <ul class="req-summary" id="requests-summary"></ul>
+        <details id="requests-details" hidden>
+          <summary>Journal détaillé</summary>
+          <div class="req-log mono" id="request-log"></div>
+        </details>
+      </article>
+
       <article class="panel" id="pages-panel" data-tab="technique" hidden>
         <div class="panel-head">
           <h2>Pages analysées</h2>
@@ -459,6 +486,7 @@
           <span class="finding-title"></span>
           <span class="finding-cat"></span>
         </span>
+        <span class="std-chip" hidden></span>
         <span class="confidence" hidden></span>
         <span class="danger-chip" hidden></span>
         <span class="sev-badge"></span>

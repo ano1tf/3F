@@ -13,6 +13,8 @@ import httpx
 from .. import config
 from ..safety import ScanError, validate_redirect_url
 
+WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
 REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 
 
@@ -48,9 +50,21 @@ class Fetcher:
     proxy SSRF (l'ancien `follow_redirects=True` d'httpx ne vérifiait rien).
     """
 
-    def __init__(self, allow_private: bool = False, enforce_guard: bool = True) -> None:
+    def __init__(
+        self,
+        allow_private: bool = False,
+        enforce_guard: bool = True,
+        auth: tuple[str, str] | None = None,
+        auth_host: str = "",
+    ) -> None:
         self.allow_private = allow_private
         self.enforce_guard = enforce_guard
+        # En-tête d'authentification fourni par le pentester : il n'est envoyé
+        # qu'à l'hôte analysé, jamais aux domaines tiers rencontrés en chemin.
+        self.auth = auth
+        self.auth_host = (auth_host or "").lower()
+        self.log: list[dict] = []
+        self.log_dropped = 0
         self._client = httpx.AsyncClient(
             timeout=httpx.Timeout(config.HTTP_TIMEOUT, connect=min(8.0, config.HTTP_TIMEOUT)),
             follow_redirects=False,  # géré à la main, saut par saut (anti-SSRF)
@@ -64,6 +78,55 @@ class Fetcher:
             },
             limits=httpx.Limits(max_connections=12, max_keepalive_connections=4),
         )
+
+    # ------------------------------------------------------------------
+    # Journal des requêtes (annexe « preuve de non-intrusivité »)
+    # ------------------------------------------------------------------
+    def _record(
+        self, method: str, url: str, status: int, elapsed_ms: int, size: int = 0, note: str = ""
+    ) -> None:
+        parts = urlsplit(url)
+        entry = {
+            "method": method.upper(),
+            "url": f"{parts.scheme}://{parts.netloc}{parts.path or '/'}",
+            "status": status,
+            "ms": elapsed_ms,
+        }
+        if size:
+            entry["bytes"] = size
+        if note:
+            entry["note"] = note
+        if len(self.log) < config.MAX_REQUEST_LOG:
+            self.log.append(entry)
+        else:
+            self.log_dropped += 1
+
+    def summary(self) -> dict:
+        """Synthèse du trafic émis : volumes, méthodes, hôtes, refus du garde-fou."""
+        by_method: dict[str, int] = {}
+        by_status: dict[str, int] = {}
+        by_host: dict[str, int] = {}
+        blocked = 0
+        for entry in self.log:
+            by_method[entry["method"]] = by_method.get(entry["method"], 0) + 1
+            status = str(entry["status"])
+            by_status[status] = by_status.get(status, 0) + 1
+            host = urlsplit(entry["url"]).netloc
+            by_host[host] = by_host.get(host, 0) + 1
+            if entry.get("note") == "bloquée":
+                blocked += 1
+        writes = sum(count for method, count in by_method.items() if method in WRITE_METHODS)
+        return {
+            "total": len(self.log) + self.log_dropped,
+            "kept": len(self.log),
+            "dropped": self.log_dropped,
+            "by_method": dict(sorted(by_method.items())),
+            "by_status": dict(sorted(by_status.items())),
+            "by_host": dict(sorted(by_host.items(), key=lambda item: -item[1])[:20]),
+            "blocked": blocked,
+            "write_methods": writes,
+            "read_only": writes == 0,
+        }
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -89,6 +152,8 @@ class Fetcher:
         read_body: bool,
         timeout: float | None,
     ) -> tuple[int, httpx.Headers, bytes, str]:
+        if self.auth and self.auth_host and urlsplit(url).netloc.lower() == self.auth_host:
+            headers = {**(headers or {}), self.auth[0]: self.auth[1]}
         async with self._client.stream(
             method,
             url,
@@ -128,6 +193,13 @@ class Fetcher:
             try:
                 await self._guard(current)
             except ScanError as exc:
+                self._record(
+                    method,
+                    current,
+                    0,
+                    int((time.perf_counter() - started) * 1000),
+                    note="bloquée",
+                )
                 return HttpResponse(
                     url=current,
                     history=history,
@@ -143,9 +215,17 @@ class Fetcher:
                     blocked=True,
                 )
 
+            hop_started = time.perf_counter()
             try:
                 status, response_headers, body, final_url = await self._send(
                     method, current, headers, max_bytes, read_body, timeout
+                )
+                self._record(
+                    method,
+                    final_url or current,
+                    status,
+                    int((time.perf_counter() - hop_started) * 1000),
+                    len(body),
                 )
             except httpx.TooManyRedirects as exc:
                 return HttpResponse(
@@ -155,6 +235,9 @@ class Fetcher:
                     elapsed_ms=int((time.perf_counter() - started) * 1000),
                 )
             except httpx.TimeoutException:
+                self._record(
+                    method, current, 0, int((time.perf_counter() - hop_started) * 1000), note="délai"
+                )
                 return HttpResponse(
                     url=current,
                     history=history,
@@ -162,6 +245,9 @@ class Fetcher:
                     elapsed_ms=int((time.perf_counter() - started) * 1000),
                 )
             except httpx.HTTPError as exc:
+                self._record(
+                    method, current, 0, int((time.perf_counter() - hop_started) * 1000), note="erreur"
+                )
                 return HttpResponse(
                     url=current,
                     history=history,

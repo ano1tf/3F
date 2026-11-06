@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 
@@ -210,3 +211,60 @@ def test_new_checks_are_reported_in_check_list(vulnerable_server):
     assert keys["libs"].status == "ok"
     assert keys["libs"].findings
     assert "exposure" in keys and keys["exposure"].status == "ok"
+
+
+def _run(url, profile="quick", auth=None):
+    async def emit(_payload: dict) -> None:
+        return None
+
+    return asyncio.run(run_scan(url, emit, profile=profile, auth=auth))
+
+
+def test_report_carries_standards_and_request_journal(vulnerable_server):
+    """Chaque constat cite CWE/WSTG/CVSS et le rapport garde la trace du trafic."""
+    report = _run(vulnerable_server.url)
+
+    summary = report.requests_summary
+    assert summary["total"] > 0
+    assert summary["read_only"] is True
+    assert summary["write_methods"] == 0
+    # Le journal ne recopie jamais la chaîne de requête (elle peut porter un jeton).
+    assert all("?" not in entry["url"] for entry in report.requests)
+    assert all(
+        entry["method"] in {"GET", "HEAD", "OPTIONS", "TRACE"} for entry in report.requests
+    )
+
+    git = next(finding for finding in report.findings if finding.id == "exposure.git")
+    assert git.cwe == "CWE-527"
+    assert git.wstg.startswith("WSTG-")
+    assert git.cvss == 7.5
+    assert git.cvss_vector.startswith("CVSS:3.1/")
+
+    # Aucun constat critique ne peut afficher un CVSS faible.
+    for finding in report.findings:
+        if finding.severity.value == "critical":
+            assert finding.cvss >= 7.0, finding.id
+
+
+def test_authenticated_scan_reaches_the_private_area(vulnerable_server):
+    def status_of(report, path: str) -> int | None:
+        return next(
+            (page["status"] for page in report.pages if page["url"].endswith(path)),
+            None,
+        )
+
+    anonymous = _run(vulnerable_server.url, profile="standard")
+    assert anonymous.auth_used is False
+    assert status_of(anonymous, "/compte") == 401
+
+    authenticated = _run(
+        vulnerable_server.url,
+        profile="standard",
+        auth=("Authorization", "Bearer test-token"),
+    )
+    assert status_of(authenticated, "/compte") == 200
+    assert authenticated.auth_used is True
+    assert authenticated.auth_kind == "bearer"
+    # Le jeton lui-même ne doit jamais apparaître dans le rapport.
+    dump = json.dumps(authenticated.to_dict(), ensure_ascii=False)
+    assert "test-token" not in dump

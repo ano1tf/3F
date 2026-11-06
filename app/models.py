@@ -52,6 +52,12 @@ class Finding:
     skill: str = ""
     grants: list[str] = field(default_factory=list)  # actifs atteignables (comptes, base…)
     grants_text: str = ""
+    # Référentiels : CWE, test OWASP WSTG, CVSS 3.1 (app.standards)
+    cwe: str = ""
+    cwe_name: str = ""
+    wstg: str = ""
+    cvss: float = 0.0
+    cvss_vector: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -72,6 +78,11 @@ class Finding:
             "skill": self.skill,
             "grants": self.grants,
             "grants_text": self.grants_text,
+            "cwe": self.cwe,
+            "cwe_name": self.cwe_name,
+            "wstg": self.wstg,
+            "cvss": self.cvss,
+            "cvss_vector": self.cvss_vector,
         }
 
 
@@ -116,6 +127,11 @@ class ScanReport:
     pages: list[dict[str, Any]] = field(default_factory=list)
     third_parties: list[dict[str, Any]] = field(default_factory=list)
     executive: dict[str, Any] = field(default_factory=dict)
+    # Annexe « preuve de non-intrusivité » : chaque requête réellement émise.
+    requests: list[dict[str, Any]] = field(default_factory=list)
+    requests_summary: dict[str, Any] = field(default_factory=dict)
+    auth_used: bool = False
+    auth_kind: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -137,5 +153,9 @@ class ScanReport:
             "pages": self.pages,
             "third_parties": self.third_parties,
             "executive": self.executive,
+            "requests": self.requests,
+            "requests_summary": self.requests_summary,
+            "auth_used": self.auth_used,
+            "auth_kind": self.auth_kind,
             "errors": self.errors,
         }

@@ -316,3 +316,49 @@ def test_reports_state_what_each_finding_gives_access_to():
     props = sarif["runs"][0]["results"][0]["properties"]
     assert "Code source et historique Git" in props["access-grants"]
     assert sarif["runs"][0]["properties"]["reachable"] == reachable
+
+
+def test_reports_include_standards_and_request_journal():
+    """Annexe « preuve de non-intrusivité » + CWE/WSTG/CVSS dans chaque constat."""
+    from app import standards
+
+    report = sample_report()
+    for finding in report["findings"]:
+        finding.update(standards.describe(finding["id"]))
+    report["requests_summary"] = {
+        "total": 8,
+        "kept": 8,
+        "dropped": 0,
+        "by_method": {"GET": 8},
+        "by_status": {"200": 7, "404": 1},
+        "by_host": {"cible.test": 8},
+        "blocked": 0,
+        "write_methods": 0,
+        "read_only": True,
+    }
+    report["requests"] = [
+        {"method": "GET", "url": "https://cible.test/.git/HEAD", "status": 200, "ms": 12},
+        {"method": "GET", "url": "https://cible.test/robots.txt", "status": 404, "ms": 9},
+    ]
+    report["auth_used"] = True
+    report["auth_kind"] = "cookie"
+
+    html_out = reporting.to_html(report)
+    assert "Annexe — requêtes effectuées" in html_out
+    assert 'class="std"' in html_out
+    assert "CWE-527" in html_out
+    assert "Aucune méthode d'écriture" in html_out
+    assert "Scan authentifié (cookie)" in html_out
+
+    md = reporting.to_markdown(report)
+    assert "Annexe — requêtes effectuées" in md
+    assert "**8 requête(s)**" in md
+    assert "`CWE-527 · WSTG-CONF-04 · CVSS 7.5`" in md
+
+    sarif = reporting.to_sarif(report)
+    props = sarif["runs"][0]["results"][0]["properties"]
+    assert props["cwe"] == "CWE-527"
+    assert props["cvss"] == 7.5
+    run_props = sarif["runs"][0]["properties"]
+    assert run_props["authUsed"] is True
+    assert run_props["requests"]["total"] == 8

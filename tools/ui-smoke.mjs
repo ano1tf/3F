@@ -19,6 +19,8 @@ const findings = [
     danger: 10, danger_label: "Critique — exploitable immédiatement, impact majeur",
     access: ["Ouvrir https://cible.test/.git/HEAD sans authentification.", "Le serveur renvoie la branche courante."],
     reveals: "Le code source complet et les secrets de l'historique.", skill: "faible",
+    cwe: "CWE-527", cwe_name: "Exposition d'un dépôt de gestion de versions",
+    wstg: "WSTG-CONF-04", cvss: 7.5, cvss_vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
     grants: ["Code source et historique Git", "Secrets de configuration", "Infrastructure cloud"],
     grants_text: "Code source et historique Git · Secrets de configuration · Infrastructure cloud" },
   { id: "content.comments-leak", title: "Commentaire sensible", severity: "low", severity_label: "Faible",
@@ -42,6 +44,14 @@ const report = {
   checks: [{ key: "headers", label: "En-têtes", status: "ok", findings: [] },
            { key: "secrets", label: "Secrets & scripts", status: "ok", findings: [] }],
   findings,
+  requests_summary: { total: 12, kept: 12, dropped: 0, by_method: { GET: 10, OPTIONS: 1, TRACE: 1 },
+                      by_status: { "200": 9, "404": 3 }, by_host: { "cible.test": 12 },
+                      blocked: 0, write_methods: 0, read_only: true },
+  requests: [
+    { method: "GET", url: "https://cible.test/.git/HEAD", status: 200, ms: 12 },
+    { method: "GET", url: "https://cible.test/robots.txt", status: 404, ms: 8 },
+  ],
+  auth_used: true, auth_kind: "bearer",
   executive: {
     risk_level: "élevé", headline: "1 faille critique donne un accès immédiat.",
     paragraph: "Analyse de 2 pages et de 11 familles de contrôles.",
@@ -134,6 +144,14 @@ setTimeout(() => {
   check("diff rempli", document.querySelector("#diff-panel").hidden === false);
   check("pages listées", document.querySelectorAll("#pages-list li").length === 2);
   check("tiers listés", document.querySelectorAll("#third-list li").length === 2);
+
+  // référentiels + journal des requêtes
+  check("CWE/WSTG/CVSS affichés", [...document.querySelectorAll(".std-chip")].some((c) => !c.hidden && c.textContent.includes("CWE-527")));
+  check("journal des requêtes visible", document.querySelector("#requests-panel").hidden === false);
+  check("résumé du journal", document.querySelectorAll("#requests-summary li").length >= 4);
+  check("lecture seule confirmée", document.querySelector("#requests-summary .ok") !== null);
+  check("journal détaillé", document.querySelectorAll("#request-log .req-line").length === 2);
+  check("champ d'authentification présent", document.querySelector("#auth") !== null);
 
   // rapport de situation
   check("panneau situation visible", document.querySelector("#situation-panel").hidden === false);

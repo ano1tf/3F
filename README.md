@@ -8,8 +8,8 @@ Aucune exploitation, aucune injection, aucun contournement d'authentification : 
 visiteur peut observer.
 
 ```
-┌ VulnLens v6.3 ─────────────────────────────────────────────────────────────┐
-│  Risque critique · score 8/100     3 pages · 12 familles de contrôles      │
+┌ VulnLens v6.4 ─────────────────────────────────────────────────────────────┐
+│  Risque critique · score 8/100     3 pages · 13 familles de contrôles      │
 ├────────────────────────────────────────────────────────────────────────────┤
 │  « Des accès ou des données sont exposés : à traiter immédiatement. »      │
 │  Ce qui expose : clé AWS dans app.js · .env public · source map publiée    │
@@ -18,6 +18,17 @@ visiteur peut observer.
 ```
 
 ---
+
+## Ce que fait la v6.4 — prêt pour un pentest
+
+| Capacité | Détail |
+|---|---|
+| **Zone authentifiée** | Champ optionnel dans l'interface (`Authorization: Bearer …` ou `Cookie: session=…`), option `--auth` / `--auth-env` en CLI, champ `auth` dans l'API. L'en-tête n'est envoyé **qu'à l'hôte analysé** — jamais après une redirection vers un domaine tiers, jamais vers un CDN — et il n'apparaît ni dans le rapport, ni dans l'historique, ni dans le journal. Le rapport indique seulement `Scan authentifié (bearer/cookie)`. |
+| **CWE + WSTG + CVSS 3.1** | Chaque constat cite le CWE (nature technique), le test OWASP WSTG correspondant et un **vecteur CVSS 3.1 dont le score est calculé** selon la spécification FIRST (jamais saisi à la main). Visible dans la fiche, le HTML, le Markdown et SARIF (`cwe`, `wstg`, `cvss`, `cvss-vector`). |
+| **Journal des requêtes** | Annexe « preuve de non-intrusivité » : nombre de requêtes, méthodes utilisées, statuts, hôtes contactés, refus du garde-fou SSRF. Le journal détaillé est dans le HTML et le Markdown, la synthèse dans l'interface (onglet Technique). Une ligne confirme l'absence de toute méthode d'écriture. |
+| **Périmètre élargi** | Le profil standard explore 8 pages (au lieu de 6) et 8 scripts : de quoi couvrir un espace client sans passer en « approfondi ». |
+| **CLI de pentest** | `vulnlens scan cible --auth-env PENTEST_AUTH --profile deep --format sarif` : le secret reste hors de l'historique du shell, la sortie s'intègre au pipeline. |
+| **Refus explicites** | En-têtes autorisés en liste blanche (`Authorization`, `Cookie`, `X-Api-Key`, `X-Auth-Token`, `X-Access-Token`, `X-Csrf-Token`), rejet des retours à la ligne (anti-injection d'en-têtes), longueur bornée. |
 
 ## Ce que fait la v6.3 — contrôle d'accès et « ce que ça donne accès »
 
@@ -256,6 +267,8 @@ app/
 ├─ narrative.py       synthèse exécutive, niveau de risque, radar, confiance
 ├─ attack.py          rapport de situation : chemin d'accès, révélation, danger 1-10
 ├─ impact.py          ce que chaque faille donne accès (comptes, base, paiements…)
+├─ standards.py       CWE, WSTG et calculateur CVSS 3.1
+├─ credentials.py     en-tête d'authentification : validation, masquage
 ├─ watch.py           surveillance planifiée (échéances, réanalyse, alertes)
 ├─ alerts.py          webhook best-effort
 ├─ db.py              SQLite, migrations, stats, analyse précédente
@@ -290,7 +303,7 @@ liste des pages concernées, pour éviter les rapports de 300 lignes répétitiv
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest        # 288 tests (dont 30 de durcissement)
+.venv/bin/python -m pytest        # 325 tests (dont 30 de durcissement)
 .venv/bin/ruff check .
 
 # interface : rendu simulé (jsdom), aucune erreur JavaScript tolérée
@@ -299,7 +312,8 @@ npm run ui:check                  # parcours de scan + tableau de bord / tendanc
 ```
 
 Couverture : normalisation et refus de cibles, scoring, en-têtes, contenu, DNS/deep, **bibliothèques front-end**,
-**analyse des JWT**, **contrôle d'accès (IDOR)**, **actifs atteignables**, **crawl**,
+**analyse des JWT**, **contrôle d'accès (IDOR)**, **actifs atteignables**, **CWE/WSTG/CVSS**,
+**en-tête d'authentification** (jamais envoyé aux tiers, jamais reporté), **journal des requêtes**, **crawl**,
 **agrégation**, **diff**, **alertes**, **vérification**, **takeover**, **secrets**, **e-mail**,
 **surface tierce**, **plan de remédiation**, **synthèse exécutive**, **surveillance**, **Certificate
 Transparency**, **empreinte technique**, **secrets et expositions élargis**, persistance, API (historique, exports, jeton, diff, plan,
@@ -317,6 +331,11 @@ CLI (`scan`, `verify`, `watch`), et un **test de fumée de l'interface** sous js
 - [x] Rapport de situation avec cotation de dangerosité 1-10
 - [x] Chasse aux secrets dans les bundles publics
 - [x] Cartographie des dépendances tierces
+- [x] CWE, WSTG et CVSS 3.1 sur chaque constat
+- [x] Journal des requêtes (preuve de non-intrusivité)
+- [x] Scan de la zone authentifiée sans jamais persister le secret
+- [ ] Import d'une portée (`scope.txt`) et d'une liste d'URLs
+- [ ] Triage des constats (confirmé / faux positif) avant export client
 - [ ] Rapport hebdomadaire par e-mail (digest de la surveillance)
 - [ ] Règles personnalisées (`*.yaml`) pour les contrôles maison
 - [ ] Comparaison multi-sites (portefeuille)

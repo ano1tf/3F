@@ -26,6 +26,7 @@ INDEX_HTML = """<!doctype html>
   <iframe src="https://video.test/embed"></iframe>
   <script src="/static/jquery-3.4.1.min.js"></script>
   <script src="/static/app.js"></script>
+  <a href="/compte">Mon espace</a>
   <a href="/users/42">Mon compte</a>
   <a href="/factures/1024">Mes factures</a>
   <a href="/recherche?q=vulnlens">Recherche</a>
@@ -94,6 +95,35 @@ class BadSiteHandler(BaseHTTPRequestHandler):
                   <input type="text" name="email">
                   <input type="password" name="secret">
                 </form></body></html>""",
+            )
+        elif path == "/compte":
+            # Zone « authentifiée » : 200 seulement avec le jeton de test.
+            if self.headers.get("Authorization") == "Bearer test-token":
+                self._send(
+                    200,
+                    "<html><head><title>Mon espace</title></head><body>"
+                    "Bienvenue Jean — commande 1024</body></html>",
+                )
+            else:
+                self._send(401, "<html><body>Authentification requise</body></html>")
+        elif path == "/redirection-externe":
+            # Redirection vers un hôte fourni : sert à vérifier qu'un en-tête
+            # d'authentification ne suit pas un saut vers un domaine tiers.
+            from urllib.parse import parse_qs, urlparse
+
+            cible = parse_qs(urlparse(self.path).query).get("vers", [""])[0]
+            if cible.startswith("http://127.0.0.1:"):
+                self.send_response(302)
+                self.send_header("Location", cible)
+                self.end_headers()
+            else:
+                self._send(400, "<html><body>cible refusée</body></html>")
+        elif path == "/echo-headers":
+            self._send(
+                200,
+                "<html><body>Authorization="
+                + (self.headers.get("Authorization") or "absente")
+                + "</body></html>",
             )
         elif path == "/users/42":
             self._send(
