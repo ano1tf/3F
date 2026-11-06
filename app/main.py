@@ -283,6 +283,8 @@ async def meta() -> dict:
             "Bibliothèques front-end : versions à CVE connue (jQuery, Bootstrap, Lodash, AngularJS…)",
             "Configuration exposée : état Terraform, clés SSH/GCP, heap dump, profiler Symfony",
             "En-têtes de débogage : profiler de framework actif en production",
+            "Contrôle d'accès : IDOR/BOLA, champs cachés, paramètres de privilège, chemins",
+            "Impact : ce que chaque faille donne accès (comptes, base, paiements, cloud…)",
             "Surface tierce : domaines chargés, rôles, formulaires qui pointent à l'extérieur",
             "Source maps exposées",
             "Plan d'action : quick/sprint/projet avec gain de score potentiel",

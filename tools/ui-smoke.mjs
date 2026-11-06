@@ -18,7 +18,9 @@ const findings = [
     remediation: "Bloquez .git/", reference: "https://owasp.org", confidence: "certain",
     danger: 10, danger_label: "Critique — exploitable immédiatement, impact majeur",
     access: ["Ouvrir https://cible.test/.git/HEAD sans authentification.", "Le serveur renvoie la branche courante."],
-    reveals: "Le code source complet et les secrets de l'historique.", skill: "faible" },
+    reveals: "Le code source complet et les secrets de l'historique.", skill: "faible",
+    grants: ["Code source et historique Git", "Secrets de configuration", "Infrastructure cloud"],
+    grants_text: "Code source et historique Git · Secrets de configuration · Infrastructure cloud" },
   { id: "content.comments-leak", title: "Commentaire sensible", severity: "low", severity_label: "Faible",
     category: "Fuite d'information", description: "Mot de passe en commentaire.", evidence: "<!-- pwd -->",
     remediation: "Nettoyez le HTML.", reference: "", confidence: "a-confirmer",
@@ -49,6 +51,7 @@ const report = {
     danger_max: 10,
     radar: [{ label: "Exposition de fichiers", value: 100 }, { label: "Fuite d'information", value: 5 },
             { label: "Configuration HTTP", value: 0 }],
+    reachable: ["Code source et historique Git", "Secrets de configuration", "Infrastructure cloud"],
   },
 };
 
@@ -139,6 +142,15 @@ setTimeout(() => {
   check("étapes en carte", document.querySelectorAll("#situation-list ol.access li").length >= 2);
   check("chip danger dans le constat", [...document.querySelectorAll(".danger-chip")].some((c) => !c.hidden && c.textContent.includes("10/10")));
   check("onglet situation compté", document.querySelector("#tab-count-situation").textContent === "2");
+
+  // ce que la faille donne accès
+  check("actifs atteignables en synthèse", document.querySelectorAll("#exec-reachable li").length === 3);
+  check("synthèse actifs visible", document.querySelector("#exec-reach").hidden === false);
+  check("actifs dans la fiche", document.querySelectorAll("#findings .finding .grants li").length === 3);
+  check(
+    "fiche sans actif masquée",
+    [...document.querySelectorAll("#findings .finding .grants-block")].some((b) => b.hidden)
+  );
 
   // onglets
   const constatsTab = document.querySelector('.tab[data-tab="constats"]');

@@ -26,6 +26,9 @@ INDEX_HTML = """<!doctype html>
   <iframe src="https://video.test/embed"></iframe>
   <script src="/static/jquery-3.4.1.min.js"></script>
   <script src="/static/app.js"></script>
+  <a href="/users/42">Mon compte</a>
+  <a href="/factures/1024">Mes factures</a>
+  <a href="/recherche?q=vulnlens">Recherche</a>
   <a href="/about">À propos</a>
   <a href="/contact">Contact</a>
   <a href="/logout">Déconnexion</a>
@@ -66,7 +69,8 @@ class BadSiteHandler(BaseHTTPRequestHandler):
             self._send(
                 200,
                 "const CFG={region:'eu-west-1',key:'AKIAZ7Q2XK4M9PLW3TRV'};\n"
-                "window.API='https://api.test.local/v1';\n",
+                "window.API='https://api.test.local/v1';\n"
+                "fetch('/admin/users').then(r => r.json());\n",
                 "application/javascript",
             )
         elif path == "/static/jquery-3.4.1.min.js":
@@ -90,6 +94,30 @@ class BadSiteHandler(BaseHTTPRequestHandler):
                   <input type="text" name="email">
                   <input type="password" name="secret">
                 </form></body></html>""",
+            )
+        elif path == "/users/42":
+            self._send(
+                200,
+                """<html><head><title>Mon compte</title></head><body>
+                <form action="/profil" method="post">
+                  <input type="hidden" name="user_id" value="42">
+                  <input type="email" name="email" value="jean@test.local">
+                </form></body></html>""",
+            )
+        elif path == "/factures/1024":
+            self._send(
+                200,
+                "<html><head><title>Facture 1024</title></head>"
+                "<body>Facture n°1024 — 149,00 €</body></html>",
+            )
+        elif path == "/recherche":
+            from urllib.parse import parse_qs
+
+            query = parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "").get("q", [""])[0]
+            self._send(
+                200,
+                "<html><head><title>Recherche</title></head>"
+                f"<body>Résultats pour {query}</body></html>",
             )
         elif path == "/terraform.tfstate":
             self._send(

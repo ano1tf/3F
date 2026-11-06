@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import impact
+
 SEVERITY_BASE = {"critical": 9, "high": 7, "medium": 5, "low": 3, "info": 1}
 
 DANGER_LABELS: tuple[tuple[int, str], ...] = (
@@ -495,6 +497,97 @@ FAMILIES: tuple[tuple[str, dict[str, Any]], ...] = (
         },
     ),
     (
+        "access.idor",
+        {
+            "steps": _steps(
+                "Ouvrir un compte ordinaire, puis relever l'identifiant d'un objet qui vous appartient.",
+                "Renvoyer la même requête avec l'identifiant d'un autre client.",
+                "La réponse contient ses données : l'autorisation n'est pas vérifiée côté serveur.",
+            ),
+            "reveals": "Les données de chaque client, une par une, avec un compte banal.",
+            "modifier": 1,
+            "skill": "faible",
+        },
+    ),
+    (
+        "access.hidden-object-id",
+        {
+            "steps": _steps(
+                "Afficher le code source du formulaire.",
+                "Modifier le champ caché qui porte l'identifiant de l'objet.",
+                "Soumettre : le serveur applique l'action au nouvel identifiant s'il ne vérifie rien.",
+            ),
+            "reveals": "La possibilité d'agir sur le compte ou la commande d'un autre utilisateur.",
+            "modifier": 1,
+            "skill": "faible",
+        },
+    ),
+    (
+        "access.parameter-control",
+        {
+            "steps": _steps(
+                "Repérer le paramètre de rôle ou de mode dans l'URL.",
+                "Changer sa valeur (rôle supérieur, mode debug).",
+                "Observer si l'interface et l'API accordent des droits supplémentaires.",
+            ),
+            "reveals": "Une élévation de privilèges obtenue sans aucune exploitation technique.",
+            "modifier": 1,
+            "skill": "faible",
+        },
+    ),
+    (
+        "access.reflected-parameter",
+        {
+            "steps": _steps(
+                "Construire un lien vers le site en plaçant du code dans le paramètre reflété.",
+                "Le faire ouvrir par la victime (e-mail, message, publicité).",
+                "Le script s'exécute dans sa session : lecture des données affichées, actions en son nom.",
+            ),
+            "reveals": "La session d'un visiteur ou d'un collaborateur, détournée depuis un simple lien.",
+            "modifier": 0,
+            "skill": "faible",
+        },
+    ),
+    (
+        "access.path-parameter",
+        {
+            "steps": _steps(
+                "Repérer le paramètre qui désigne un fichier ou une page.",
+                "Tenter un chemin relatif (`../`) ou une ressource hors du répertoire prévu.",
+                "Lire le contenu renvoyé : configuration, code, fichiers d'autres utilisateurs.",
+            ),
+            "reveals": "Des fichiers du serveur que l'application ne prévoyait pas de publier.",
+            "modifier": -1,
+            "skill": "intermédiaire",
+        },
+    ),
+    (
+        "access.sensitive-endpoint",
+        {
+            "steps": _steps(
+                "Relever les chemins d'administration cités par les scripts publics.",
+                "Les demander directement, sans passer par l'interface.",
+                "Vérifier si l'API applique le même contrôle de rôle que l'écran.",
+            ),
+            "reveals": "Des fonctions réservées aux administrateurs, si la protection n'est qu'interface.",
+            "modifier": -1,
+            "skill": "faible",
+        },
+    ),
+    (
+        "access.",
+        {
+            "steps": _steps(
+                "Repérer le paramètre ou l'objet manipulable depuis l'URL.",
+                "Le faire varier vers une ressource qui ne vous appartient pas.",
+                "Vérifier si le serveur applique un contrôle d'autorisation ou se contente de l'interface.",
+            ),
+            "reveals": "Un accès non prévu à des ressources ou des fonctions d'un autre niveau de droits.",
+            "modifier": 1,
+            "skill": "faible",
+        },
+    ),
+    (
         "dns.zone-transfer",
         {
             "steps": _steps(
@@ -651,12 +744,15 @@ def scenario(finding: dict[str, Any], target: str) -> dict[str, Any]:
     steps = [step.replace("{target}", site or "le site").replace("{host}", site or "le site")
              for step in family.get("steps", DEFAULT_FAMILY["steps"])]
 
+    grants = impact.labels(finding_id)
     return {
         "danger": danger,
         "danger_label": danger_label(danger),
         "access": steps,
         "reveals": family.get("reveals", DEFAULT_FAMILY["reveals"]),
         "skill": family.get("skill", "faible"),
+        "grants": grants,
+        "grants_text": " · ".join(grants),
     }
 
 
@@ -688,6 +784,7 @@ def situation_table(findings: list[dict[str, Any]], limit: int = 10) -> list[dic
             "danger_label": item.get("danger_label", ""),
             "access": item.get("access", []),
             "reveals": item.get("reveals", ""),
+            "grants": item.get("grants", []),
             "skill": item.get("skill", ""),
             "remediation": item.get("remediation", ""),
         }

@@ -282,3 +282,37 @@ def test_markdown_includes_situation():
     assert "## Rapport de situation" in markdown
     assert "danger 10/10" in markdown
     assert "**Comment y arriver :**" in markdown
+
+
+def test_reports_state_what_each_finding_gives_access_to():
+    """Chaque rapport nomme les actifs exposés (comptes, code, base…)."""
+    from app import attack, impact
+
+    report = sample_report()
+    attack.annotate(report["findings"], report["final_url"])
+    impact.annotate(report["findings"])
+    reachable = impact.reachable(report["findings"])
+    report["executive"] = {
+        "risk_level": "élevé",
+        "headline": "Un dépôt Git est public.",
+        "paragraph": "Le code source est lisible par tous.",
+        "key_risks": [],
+        "strengths": [],
+        "radar": [],
+        "danger_max": 9,
+        "reachable": reachable,
+    }
+
+    html_out = reporting.to_html(report)
+    assert "Donne accès à" in html_out
+    assert "Code source et historique Git" in html_out
+    assert "peut atteindre" in html_out
+
+    md = reporting.to_markdown(report)
+    assert "**Donne accès à :** Code source et historique Git" in md
+    assert "### Ce que l'attaquant peut atteindre" in md
+
+    sarif = reporting.to_sarif(report)
+    props = sarif["runs"][0]["results"][0]["properties"]
+    assert "Code source et historique Git" in props["access-grants"]
+    assert sarif["runs"][0]["properties"]["reachable"] == reachable

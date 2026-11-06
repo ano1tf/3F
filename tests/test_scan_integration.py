@@ -40,6 +40,9 @@ def test_full_scan_detects_expected_issues(vulnerable_server):
     assert "exposure.ssh-private-key" in ids
     assert "headers.debug-token" in ids
     assert "libs.jquery" in ids
+    # Contrôle d'accès passif : le mode rapide lit les liens sans les ouvrir.
+    assert "access.idor-object-id" in ids
+    assert "access.sensitive-endpoint" in ids
 
     assert report.score < 60
     assert report.grade in {"D", "E", "F"}
@@ -51,6 +54,16 @@ def test_full_scan_detects_expected_issues(vulnerable_server):
     assert report.score_breakdown
     assert report.score == max(0, min(100, 100 - penalty))
     assert 1 <= len(report.priorities) <= 3
+
+    # Chaque constat dit ce qu'il donne accès ; la synthèse liste les actifs joignables.
+    idor = next(finding for finding in report.findings if finding.id == "access.idor-object-id")
+    assert idor.grants and "Comptes utilisateurs" in idor.grants
+    assert idor.grants_text
+    assert idor.confidence == "a-confirmer"
+    for finding in report.findings:
+        assert finding.grants, finding.id
+    assert report.executive["reachable"]
+    assert "Comptes utilisateurs" in report.executive["reachable"]
 
     kinds = [event["type"] for event in events]
     assert kinds[0] in {"progress", "accepted"}
@@ -104,6 +117,10 @@ def test_standard_profile_aggregates_pages(vulnerable_server):
     assert len(report.pages) >= 2
     urls = " ".join(page["url"] for page in report.pages)
     assert "/about" in urls and "/contact" in urls
+    # Les pages ouvertes révèlent en plus le champ caché et le paramètre reflété.
+    ids = {finding.id for finding in report.findings}
+    assert "access.hidden-object-id" in ids
+    assert "access.reflected-parameter" in ids
     # Une même famille de problème devient un seul constat enrichi.
     aggregated = next(f for f in report.findings if f.id == "headers.missing.referrer-policy")
     assert "pages analysées" in aggregated.evidence.lower()

@@ -465,6 +465,16 @@
       }
       $(".reveals", node).textContent = finding.reveals || "Impact non détaillé.";
 
+      const grantsBlock = $(".grants-block", node);
+      const grantsList = $(".grants", node);
+      const grants = finding.grants || [];
+      if (grants.length) {
+        grantsBlock.hidden = false;
+        grants.forEach((asset) => grantsList.appendChild(el("li", null, asset)));
+      } else {
+        grantsBlock.hidden = true;
+      }
+
       const confidence = $(".confidence", node);
       if (finding.confidence && finding.confidence !== "certain") {
         confidence.hidden = false;
@@ -797,6 +807,8 @@
       "",
       finding.description,
       "",
+      finding.grants && finding.grants.length ? `Donne accès à : ${finding.grants.join(" · ")}` : "",
+      finding.grants && finding.grants.length ? "" : "",
       "Preuve :",
       finding.evidence || "—",
       "",
@@ -1338,6 +1350,19 @@
     (executive.strengths || []).forEach((item) => strengths.appendChild(el("li", null, item)));
     if (!(executive.strengths || []).length) {
       strengths.appendChild(el("li", null, "Rien de solide à mettre en avant pour l'instant."));
+    }
+
+    const reachBox = $("#exec-reach");
+    const reachList = $("#exec-reachable");
+    const reachable = executive.reachable || [];
+    if (reachBox && reachList) {
+      reachList.innerHTML = "";
+      if (reachable.length) {
+        reachBox.hidden = false;
+        reachable.forEach((asset) => reachList.appendChild(el("li", null, asset)));
+      } else {
+        reachBox.hidden = true;
+      }
     }
 
     $("#radar").innerHTML = radarSvg(executive.radar || []);

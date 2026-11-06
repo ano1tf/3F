@@ -1234,3 +1234,32 @@ ol.access li { margin: 5px 0; }
 .situation-card .sit-fix { margin: 0; font-size: 12.5px; color: #b7e7cf; }
 .situation-card .sit-fix strong { color: #d6f5e5; }
 .situation-card ol { margin: 0; }
+
+
+/* Ce que la faille donne accès (comptes, base, paiements…) */
+.grants-block h3 { color: #7fd7f2; }
+.grants { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 0; padding: 0; }
+.grants li {
+  background: rgba(34, 211, 238, 0.12);
+  border: 1px solid rgba(34, 211, 238, 0.35);
+  color: #bde9f7;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.exec-reach { margin-top: 18px; }
+.exec-reach h3 { margin: 0 0 8px; font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.reach-list { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; }
+.reach-list li {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-strong, #24344b);
+  border-radius: 999px;
+  padding: 4px 11px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #d7e6f5;
+}
+@media print {
+  .grants li, .reach-list li { border-color: #999 !important; color: #222 !important; background: #fff !important; }
+}

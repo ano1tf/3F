@@ -8,8 +8,8 @@ Aucune exploitation, aucune injection, aucun contournement d'authentification : 
 visiteur peut observer.
 
 ```
-┌ VulnLens v6.2 ─────────────────────────────────────────────────────────────┐
-│  Risque critique · score 8/100     3 pages · 11 familles de contrôles      │
+┌ VulnLens v6.3 ─────────────────────────────────────────────────────────────┐
+│  Risque critique · score 8/100     3 pages · 12 familles de contrôles      │
 ├────────────────────────────────────────────────────────────────────────────┤
 │  « Des accès ou des données sont exposés : à traiter immédiatement. »      │
 │  Ce qui expose : clé AWS dans app.js · .env public · source map publiée    │
@@ -18,6 +18,20 @@ visiteur peut observer.
 ```
 
 ---
+
+## Ce que fait la v6.3 — contrôle d'accès et « ce que ça donne accès »
+
+| Capacité | Détail |
+|---|---|
+| **Détection d'IDOR / BOLA** | Les identifiants d'objets sont repérés dans les URL explorées **et dans les liens publiés** (sans les ouvrir) : `/users/42`, `/factures/1024`, `?user_id=7`, UUID compris. Le constat explique la faille, cite OWASP (IDOR, API1:2023) et reste marqué **« à confirmer »** : la confirmation exige deux comptes de test, jamais un rejeu d'identifiant par l'outil. |
+| **Champs cachés manipulables** | Un `<input type="hidden" name="user_id">` dans un formulaire est signalé : mass assignment, agissement sur les données d'autrui. |
+| **Paramètres de privilège** | `admin`, `role`, `is_admin`, `impersonate`, `debug`, `internal`… dans l'URL : un changement de valeur ne doit jamais élever les droits. |
+| **Paramètres de chemin et redirections** | `file`, `path`, `page`, `template`, `url`, `redirect`, `next`… : traversée de répertoire et redirection ouverte si aucune liste blanche ne les encadre. |
+| **Paramètres reflétés** | Une valeur d'URL recopiée telle quelle dans le HTML (XSS réfléchi) est détectée **sans envoyer de charge** : on observe seulement la réflexion. |
+| **Surface d'administration** | Les chemins `/admin`, `/internal`, `/backoffice`, `/staff`, `/console` cités par les scripts publics sont listés : vérifiez qu'ils ne sont pas protégés que par l'interface. |
+| **« Ce que ça donne accès »** | Chaque constat porte désormais la liste des **actifs réellement atteignables** : comptes utilisateurs, sessions, console d'admin, données personnelles, paiements, base de données, code source, cloud, serveurs, secrets, intégrations SaaS, messagerie, navigateur des visiteurs, réseau interne. Affiché dans l'interface, le HTML, le Markdown et SARIF (`access-grants`). |
+| **Synthèse « ce que l'attaquant peut atteindre »** | Le rapport agrège ces actifs, pondérés par la sévérité : la synthèse exécutive répond en une ligne à « si je ne corrige pas, qu'est-ce qui tombe ? ». |
+| **Non destructif** | Aucun identifiant n'est incrémenté, aucun rôle forgé, aucun formulaire soumis, aucune suppression : le contrôle d'accès est **entièrement passif**, comme le reste du scanner. |
 
 ## Ce que fait la v6.2 — détection élargie
 
@@ -241,6 +255,7 @@ app/
 ├─ remediation.py     plan d'action (effort, priorité, gain de score)
 ├─ narrative.py       synthèse exécutive, niveau de risque, radar, confiance
 ├─ attack.py          rapport de situation : chemin d'accès, révélation, danger 1-10
+├─ impact.py          ce que chaque faille donne accès (comptes, base, paiements…)
 ├─ watch.py           surveillance planifiée (échéances, réanalyse, alertes)
 ├─ alerts.py          webhook best-effort
 ├─ db.py              SQLite, migrations, stats, analyse précédente
@@ -253,6 +268,7 @@ app/
 │  ├─ checks_http.py  en-têtes, cookies, méthodes, HSTS
 │  ├─ checks_secrets.py   33 signatures de secrets, JWT et source maps
 │  ├─ checks_libs.py      bibliothèques front-end vs versions corrigées (CVE)
+│  ├─ checks_access.py    IDOR/BOLA, champs cachés, paramètres de privilège (passif)
 │  ├─ checks_email.py     DMARC, SPF, DKIM, MTA-STS, TLS-RPT
 │  ├─ checks_thirdparty.py cartographie des dépendances tierces
 │  ├─ recon_ct.py          sous-domaines via Certificate Transparency
@@ -274,7 +290,7 @@ liste des pages concernées, pour éviter les rapports de 300 lignes répétitiv
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest        # 267 tests (dont 30 de durcissement)
+.venv/bin/python -m pytest        # 288 tests (dont 30 de durcissement)
 .venv/bin/ruff check .
 
 # interface : rendu simulé (jsdom), aucune erreur JavaScript tolérée
@@ -283,7 +299,7 @@ npm run ui:check                  # parcours de scan + tableau de bord / tendanc
 ```
 
 Couverture : normalisation et refus de cibles, scoring, en-têtes, contenu, DNS/deep, **bibliothèques front-end**,
-**analyse des JWT**, **crawl**,
+**analyse des JWT**, **contrôle d'accès (IDOR)**, **actifs atteignables**, **crawl**,
 **agrégation**, **diff**, **alertes**, **vérification**, **takeover**, **secrets**, **e-mail**,
 **surface tierce**, **plan de remédiation**, **synthèse exécutive**, **surveillance**, **Certificate
 Transparency**, **empreinte technique**, **secrets et expositions élargis**, persistance, API (historique, exports, jeton, diff, plan,

@@ -50,6 +50,8 @@ class Finding:
     access: list[str] = field(default_factory=list)
     reveals: str = ""
     skill: str = ""
+    grants: list[str] = field(default_factory=list)  # actifs atteignables (comptes, base…)
+    grants_text: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -68,6 +70,8 @@ class Finding:
             "access": self.access,
             "reveals": self.reveals,
             "skill": self.skill,
+            "grants": self.grants,
+            "grants_text": self.grants_text,
         }
 
 

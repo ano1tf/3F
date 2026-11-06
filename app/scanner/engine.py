@@ -13,6 +13,7 @@ from .. import attack, config, narrative, verify
 from ..models import CheckResult, Finding, ScanReport
 from ..safety import ScanError, validate_target
 from . import (
+    checks_access,
     checks_content,
     checks_deep,
     checks_dns,
@@ -57,6 +58,7 @@ STEPS = [
     ("content", "Analyse du contenu et des formulaires"),
     ("surface", "Cartographie des dépendances tierces"),
     ("secrets", "Recherche de secrets dans les scripts"),
+    ("access", "Contrôle d'accès : IDOR, privilèges, paramètres"),
     ("libs", "Bibliothèques front-end et versions corrigées"),
     ("deep", "Contrôles approfondis (AXFR, sous-domaines, redirections)"),
     ("score", "Calcul du score et du rapport"),
@@ -398,6 +400,31 @@ async def run_scan(
             )
 
         # ------------------------------------------------------------------
+        # Phase 5 quater — contrôle d'accès (100 % passif)
+        # ------------------------------------------------------------------
+        await advance("access", 89, "Contrôle d'accès : IDOR, privilèges et paramètres")
+        try:
+            access_findings = checks_access.inspect(
+                [(page.url, page.response.text) for page in pages],
+                fetched_scripts,
+            )
+            findings.extend(access_findings)
+            checks.append(
+                CheckResult(
+                    "access",
+                    "Contrôle d'accès",
+                    detail=f"{len(access_findings)} piste(s) d'escalade",
+                    findings=access_findings,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            checks.append(
+                CheckResult(
+                    "access", "Contrôle d'accès", status="error", detail=f"Phase interrompue : {exc}"
+                )
+            )
+
+        # ------------------------------------------------------------------
         # Phase 5 ter — bibliothèques front-end obsolètes (CVE connues)
         # ------------------------------------------------------------------
         await advance("libs", 90, "Comparaison des bibliothèques front-end aux versions corrigées")
@@ -471,9 +498,9 @@ async def run_scan(
         report.counts = count_by_severity(report.findings)
         report.checks = checks
         for finding in report.findings:
-            # Un contrôle peut déjà avoir qualifié sa certitude (version devinée dans un
-            # bundle) : on ne l'écrase pas par la valeur par défaut.
-            if finding.confidence != "probable":
+            # Un contrôle peut déjà avoir qualifié sa certitude (IDOR non testé, version
+            # devinée dans un bundle) : on ne l'écrase pas par la valeur par défaut.
+            if finding.confidence == "certain":
                 finding.confidence = narrative.confidence_for(finding.id)
         enriched = attack.annotate([f.to_dict() for f in report.findings], report.final_url or target.url)
         for finding, data in zip(report.findings, enriched, strict=False):
@@ -482,6 +509,8 @@ async def run_scan(
             finding.access = data["access"]
             finding.reveals = data["reveals"]
             finding.skill = data["skill"]
+            finding.grants = data.get("grants", [])
+            finding.grants_text = data.get("grants_text", "")
         report.duration_ms = int((time.perf_counter() - started) * 1000)
         report.executive = narrative.build(report.to_dict())
 

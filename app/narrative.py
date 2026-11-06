@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import impact as impact_assets
+
 RISK_LEVELS: tuple[tuple[int, str, str], ...] = (
     (80, "faible", "La posture est saine ; il reste des finitions."),
     (60, "modéré", "Des faiblesses exploitables existent, mais le socle tient."),
@@ -16,6 +18,21 @@ RISK_LEVELS: tuple[tuple[int, str, str], ...] = (
 )
 
 IMPACTS: tuple[tuple[str, str], ...] = (
+    (
+        "access.idor",
+        "Avec un simple compte, un attaquant lit — et parfois modifie — les données de tous les "
+        "autres clients : factures, adresses, commandes, messages.",
+    ),
+    (
+        "access.parameter-control",
+        "Un paramètre d'URL suffit à changer de rôle : l'attaquant peut se donner les droits d'un "
+        "administrateur sans aucune faille technique à exploiter.",
+    ),
+    (
+        "access.",
+        "Une barrière d'autorisation manque ou se contourne : les données d'autrui deviennent "
+        "accessibles avec un compte ordinaire.",
+    ),
     (
         "exposure.",
         "Un attaquant récupère du code, des sauvegardes ou des secrets sans aucune authentification.",
@@ -226,6 +243,7 @@ def build(report: dict[str, Any]) -> dict[str, Any]:
             "info": int(counts.get("info", 0)),
             "total": total,
         },
+        "reachable": impact_assets.reachable(findings),
     }
 
 

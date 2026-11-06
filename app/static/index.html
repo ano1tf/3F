@@ -25,7 +25,7 @@
         </svg>
       </span>
       <span class="brand-name">VulnLens</span>
-      <span class="brand-tag">v6.2</span>
+      <span class="brand-tag">v6.3</span>
     </a>
     <nav class="topnav">
       <button class="nav-btn" id="nav-analyzer" type="button" aria-pressed="true">Analyser</button>
@@ -43,13 +43,15 @@
       </div>
       <h1>La surface d'attaque de votre site,<br /><span class="grad">en un clic.</span></h1>
       <p class="hero-sub">
-        Transport, TLS, en-têtes, secrets, dépendances tierces, e-mail et sous-domaines :
-        un rapport priorisé, une synthèse lisible par votre direction et un plan d'action
-        chiffré en quelques secondes.
+        Transport, TLS, en-têtes, secrets, contrôle d'accès (IDOR), dépendances tierces, e-mail
+        et sous-domaines : un rapport priorisé qui dit <strong>ce que chaque faille donne accès</strong>,
+        une synthèse lisible par votre direction et un plan d'action chiffré en quelques secondes.
       </p>
       <div class="hero-chips" aria-label="Capacités clés">
         <span>Synthèse exécutive</span>
         <span>Chasse aux secrets</span>
+        <span>IDOR &amp; contrôle d'accès</span>
+        <span>Actifs exposés</span>
         <span>Certificate Transparency</span>
         <span>Surveillance planifiée</span>
         <span>100 % passif</span>
@@ -190,6 +192,10 @@
                 <h3>Ce qui tient déjà</h3>
                 <ul class="exec-strengths" id="exec-strengths"></ul>
               </div>
+            </div>
+            <div class="exec-reach" id="exec-reach" hidden>
+              <h3>Ce que l'attaquant peut atteindre</h3>
+              <ul class="reach-list" id="exec-reachable"></ul>
             </div>
           </div>
           <div class="exec-radar">
@@ -469,6 +475,10 @@
         <div class="block">
           <h3>Ce que ça révèle</h3>
           <p class="reveals"></p>
+        </div>
+        <div class="block grants-block" hidden>
+          <h3>Donne accès à</h3>
+          <ul class="grants"></ul>
         </div>
         <div class="block">
           <h3>Preuve</h3>

@@ -105,6 +105,7 @@ def to_sarif(report: dict[str, Any]) -> dict[str, Any]:
                     "category": finding.get("category", ""),
                     "evidence": finding.get("evidence", ""),
                     "remediation": finding.get("remediation", ""),
+                    "access-grants": finding.get("grants", []),
                 },
             }
         )
@@ -136,6 +137,7 @@ def to_sarif(report: dict[str, Any]) -> dict[str, Any]:
                     "profile": report.get("profile", "quick"),
                     "riskLevel": (report.get("executive") or {}).get("risk_level", ""),
                     "domainVerified": bool(report.get("verified")),
+                    "reachable": (report.get("executive") or {}).get("reachable", []),
                     "pagesAnalyzed": len(report.get("pages") or []),
                     "pages": [page.get("url") for page in (report.get("pages") or [])],
                 },
@@ -182,6 +184,10 @@ def to_markdown(report: dict[str, Any]) -> str:
             lines.append("### Ce qui tient déjà")
             lines += [f"- {item}" for item in executive["strengths"]]
             lines.append("")
+        if executive.get("reachable"):
+            lines.append("### Ce que l'attaquant peut atteindre")
+            lines += [f"- {item}" for item in executive["reachable"]]
+            lines.append("")
 
     plan = remediation.build_plan(report)
     if plan["available"]:
@@ -226,6 +232,8 @@ def to_markdown(report: dict[str, Any]) -> str:
             lines += [f"{step_index}. {step}" for step_index, step in enumerate(item["access"], start=1)]
             lines.append("")
             lines.append(f"**Ce que ça révèle :** {item['reveals']}")
+            if item.get("grants"):
+                lines.append(f"**Donne accès à :** {' · '.join(item['grants'])}")
             lines.append(f"**Correction :** {item['remediation']}")
             lines.append("")
 
@@ -249,6 +257,8 @@ def to_markdown(report: dict[str, Any]) -> str:
             lines.append("")
         if finding.get("reveals"):
             lines += [f"**Ce que ça révèle :** {finding['reveals']}", ""]
+        if finding.get("grants"):
+            lines += [f"**Donne accès à :** {' · '.join(finding['grants'])}", ""]
         if finding.get("evidence"):
             lines += ["```", finding["evidence"], "```", ""]
         if finding.get("remediation"):
@@ -372,7 +382,7 @@ def to_html(report: dict[str, Any]) -> str:
           <p class="desc">{_e(finding.get("description", ""))}</p>
           {f'''<div class="find-danger">{_danger_meter(finding.get("danger", 0), finding.get("danger_label", ""))}</div>
           <div class="block"><h4>Comment y arriver</h4><ol class="sit-steps">{"".join(f"<li>{_e(step)}</li>" for step in finding.get("access") or [])}</ol></div>
-          <div class="block"><h4>Ce que ça révèle</h4><p class="sit-reveals">{_e(finding.get("reveals", ""))}</p></div>''' if finding.get("danger") else ""}
+          <div class="block"><h4>Ce que ça révèle</h4><p class="sit-reveals">{_e(finding.get("reveals", ""))}</p>{f'<p class="sit-grants"><strong>Donne accès à :</strong> {_e(" · ".join(finding["grants"]))}</p>' if finding.get("grants") else ""}</div>''' if finding.get("danger") else ""}
           <div class="block"><h4>Preuve</h4><pre>{_e(finding.get("evidence") or "—")}</pre></div>
           <div class="block fix"><h4>Remédiation</h4><p>{_e(finding.get("remediation") or "—")}</p></div>
           {f'<a class="ref" href="{_e(reference)}">Documentation ↗</a>' if reference else ''}
@@ -457,6 +467,14 @@ def to_html(report: dict[str, Any]) -> str:
         )
         strengths = "".join(f"<li>{_e(item)}</li>" for item in executive.get("strengths", []))
         radar_svg = _radar_svg(executive.get("radar") or [])
+        reachable = executive.get("reachable") or []
+        reach_html = (
+            "<h4>Ce que l'attaquant peut atteindre</h4><ul class=\"reach-list\">"
+            + "".join(f"<li>{_e(asset)}</li>" for asset in reachable)
+            + "</ul>"
+            if reachable
+            else ""
+        )
         executive_html = f'''
   <h2>Synthèse</h2>
   <div class="panel exec">
@@ -466,6 +484,7 @@ def to_html(report: dict[str, Any]) -> str:
       <p class="exec-paragraph">{_e(executive.get("paragraph"))}</p>
       <h4>Ce qui expose le plus</h4>
       <ul class="exec-risks">{risks or "<li>Aucun risque majeur détecté.</li>"}</ul>
+      {reach_html}
       <h4>Ce qui tient déjà</h4>
       <ul class="exec-strengths">{strengths or "<li>Pas encore d'élément solide à mettre en avant.</li>"}</ul>
     </div>
@@ -484,6 +503,7 @@ def to_html(report: dict[str, Any]) -> str:
           <p class="sit-cat">{_e(item["category"])} · {_e(item["severity_label"])} · compétence {_e(item["skill"])}</p>
           <h4>Comment y arriver</h4><ol class="sit-steps">{steps}</ol>
           <h4>Ce que ça révèle</h4><p class="sit-reveals">{_e(item["reveals"])}</p>
+          {f'<p class="sit-grants"><strong>Donne accès à :</strong> {_e(" · ".join(item["grants"]))}</p>' if item.get("grants") else ""}
           <p class="sit-fix"><strong>Correction :</strong> {_e(item["remediation"])}</p>
         </article>'''
             )
@@ -600,6 +620,10 @@ def to_html(report: dict[str, Any]) -> str:
   .sit-steps {{ margin:0; padding-left:18px; font-size:12.5px; color:#334155; }}
   .sit-steps li {{ margin:4px 0; }}
   .sit-reveals {{ margin:0; font-size:12.5px; color:#334155; }}
+  .sit-grants {{ margin:6px 0 0; font-size:12.5px; color:#0b4f6c; }}
+  .reach-list {{ list-style:none; padding:0; margin:4px 0 0; display:flex; flex-wrap:wrap; gap:6px; }}
+  .reach-list li {{ background:#e6f4fa; border:1px solid #b6dced; color:#0b4f6c;
+                    border-radius:999px; padding:2px 9px; font-size:11.5px; font-weight:600; }}
   .sit-fix {{ margin:8px 0 0; font-size:12px; color:#14532d; }}
   .find-danger {{ margin:12px 0 0; }}
   .danger {{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:11px; color:var(--muted); }}
