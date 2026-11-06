@@ -341,6 +341,7 @@
     renderChecks(report.checks || []);
     renderRequests(report);
     renderTriageBar(report);
+    renderAgents(report);
 
     if (!options.fromHistory) {
       saveToHistory(report);
@@ -591,6 +592,69 @@
     });
   }
 
+
+  /* ---------------------------- Équipe d'agents -------------------------- */
+
+  function renderAgents(report) {
+    const panel = $("#agents-panel");
+    const plan = (report && report.attack_plan) || {};
+    if (!panel) return;
+    if (!plan.available || !(plan.chains || []).length) {
+      panel.hidden = true;
+      return;
+    }
+    panel.hidden = false;
+    const stats = plan.stats || {};
+    $("#agents-stats").textContent =
+      `${stats.hypotheses || 0} hypothèses · ${stats.chains || 0} chaînes · ` +
+      `confiance moyenne ${Math.round((stats.confidence || 0) * 100)} %`;
+    $("#agents-narrative").textContent = plan.narrative || "";
+
+    const container = $("#agents-chains");
+    container.innerHTML = "";
+    (plan.chains || []).forEach((chain) => {
+      const card = el("article", "chain-card");
+      const head = el("header");
+      head.appendChild(el("h3", null, chain.title));
+      head.appendChild(el("span", "chain-score", `${chain.score}/10`));
+      card.appendChild(head);
+      card.appendChild(el("p", "chain-summary", chain.summary || ""));
+
+      const steps = el("ol", "chain-steps");
+      (chain.steps || []).forEach((step) => {
+        const li = el("li");
+        li.appendChild(el("span", "stage", step.stage_label || ""));
+        li.appendChild(el("span", "claim", step.claim || ""));
+        li.appendChild(el("span", "conf", `${Math.round((step.confidence || 0) * 100)} %`));
+        li.appendChild(el("em", "mitre", (step.techniques || []).join(", ")));
+        steps.appendChild(li);
+      });
+      card.appendChild(steps);
+
+      const meta = el(
+        "p",
+        "chain-meta",
+        `Difficulté ${chain.difficulty} · confiance ${Math.round((chain.confidence || 0) * 100)} % · ` +
+          `${(chain.steps || []).length} étape(s)`
+      );
+      card.appendChild(meta);
+
+      const impact = el("p", "chain-impact");
+      (chain.impact || []).forEach((asset) => impact.appendChild(el("span", "asset-chip", asset)));
+      card.appendChild(impact);
+      container.appendChild(card);
+    });
+
+    const next = $("#agents-next");
+    next.innerHTML = "";
+    (plan.next_steps || []).forEach((item) => {
+      const li = el("li", null, `${item.action} `);
+      li.appendChild(el("em", null, `(confiance ${item.confidence})`));
+      next.appendChild(li);
+    });
+    $("#agents-doctrine").textContent = plan.doctrine || "";
+    $("#agents-details").hidden = !(plan.next_steps || []).length;
+  }
 
   /* ------------------------------- Triage -------------------------------- */
 

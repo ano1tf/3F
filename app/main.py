@@ -317,6 +317,7 @@ async def meta() -> dict:
             "Zone authentifiée optionnelle : en-tête fourni, jamais stocké ni reporté",
             "Triage des constats : confirmé / faux positif / risque accepté, avec justification",
             "Score retenu après triage et suppressions SARIF des faux positifs",
+            "Équipe d'agents locale (sans API) : hypothèses d'attaque, revue croisée et chaînes d'exploitation",
             "Impact : ce que chaque faille donne accès (comptes, base, paiements, cloud…)",
             "Surface tierce : domaines chargés, rôles, formulaires qui pointent à l'extérieur",
             "Source maps exposées",

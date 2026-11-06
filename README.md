@@ -8,7 +8,7 @@ Aucune exploitation, aucune injection, aucun contournement d'authentification : 
 visiteur peut observer.
 
 ```
-┌ VulnLens v6.5 ─────────────────────────────────────────────────────────────┐
+┌ VulnLens v6.6 ─────────────────────────────────────────────────────────────┐
 │  Risque critique · score 8/100     3 pages · 13 familles de contrôles      │
 ├────────────────────────────────────────────────────────────────────────────┤
 │  « Des accès ou des données sont exposés : à traiter immédiatement. »      │
@@ -18,6 +18,23 @@ visiteur peut observer.
 ```
 
 ---
+
+## Ce que fait la v6.6 — une équipe d'agents red team, sans API
+
+Sept spécialistes et un chef d'équipe raisonnent **localement** sur les preuves déjà collectées.
+Aucun modèle de langage, aucun appel réseau, aucune dépendance : des règles explicites, donc un
+raisonnement auditable, reproductible, et impossible à transformer en outil d'attaque.
+
+| Capacité | Détail |
+|---|---|
+| **Sept spécialistes** | *Recon* (surface, versions, schémas d'API), *Exposition* (fichiers, sauvegardes, configuration), *Identifiants* (JWT, clés, sessions), *Accès* (IDOR, privilèges, traversée), *Client* (XSS, dépendances, CSP), *Transport* (TLS, CORS, formulaires en clair), *Chaîne logistique* (takeover, tiers, SRI). Chacun ne parle que de son domaine et cite **ses preuves** (identifiants de constats). |
+| **Hypothèses, pas des alertes** | Chaque agent formule des affirmations d'attaque : identifiant stable (`agent:sujet:cible`), étape (reconnaissance → accès → élévation → exfiltration → persistance), confiance chiffrée, techniques MITRE ATT&CK, actif atteignable, et la **vérification manuelle non destructive** correspondante. |
+| **Revue par les pairs** | Les agents se contredisent : une pile logicielle identifiée crédibilise les hypothèses serveur (+0,05), une CSP stricte tempère un XSS (−0,05), un vol de session sans XSS confirmé est dégradé (−0,10). Le journal garde la trace de chaque correction, avec sa raison. |
+| **Arbitrage** | Le chef d'équipe écarte ce qui n'est pas étayé (confiance < 0,30, sauf actif critique ≥ 0,45), fusionne les doublons en gardant le plus solide, et conserve les désaccords (`dissent`) au lieu de les effacer. |
+| **Chaînes d'exploitation** | Cinq scénarios assemblés à partir des étapes réelles : prise de contrôle de compte, exfiltration de données clients, compromission d'infrastructure, compromission du navigateur des visiteurs, cartographie de reconnaissance. Une chaîne n'existe que si elle a un **point d'entrée** ; sa confiance est celle de son **maillon le plus faible** ; son score combine l'impact de l'actif, la confiance et la difficulté. |
+| **Restitution** | Panneau « Équipe red team » dans l'interface (score /10, étapes numérotées, confiance par étape, prochaines vérifications), section `## Lecture red team` en Markdown, cartes dans le rapport HTML, et `properties.attackChains` en SARIF pour la CI. Le rapport JSON expose `attack_plan` (hypothèses, chaînes, journal, désaccords, statistiques). |
+| **Rejeu en CLI** | `vulnlens agents <id-analyse>` rejoue l'équipe sur une analyse enregistrée (ou `--json` pour la matière brute) : utile pour comparer deux versions d'un rapport sans rescanner. |
+| **Doctrine, garantie technique** | Les agents n'ont **pas d'accès réseau** (c'est vérifié par un test qui rend `socket` inutilisable) et ne produisent **aucune charge** : pas de requête forgée, pas de jeton signé, pas de formulaire soumis, pas de fichier écrit sur la cible. Ce sont des règles de raisonnement sur des preuves, pas un exécuteur d'exploit. |
 
 ## Ce que fait la v6.5 — triage des constats
 

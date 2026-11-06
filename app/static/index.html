@@ -25,7 +25,7 @@
         </svg>
       </span>
       <span class="brand-name">VulnLens</span>
-      <span class="brand-tag">v6.5</span>
+      <span class="brand-tag">v6.6</span>
     </a>
     <nav class="topnav">
       <button class="nav-btn" id="nav-analyzer" type="button" aria-pressed="true">Analyser</button>
@@ -237,6 +237,20 @@
           Technique <span class="tab-count" id="tab-count-technique"></span>
         </button>
       </div>
+
+      <article class="panel" id="agents-panel" data-tab="situation" hidden>
+        <div class="panel-head">
+          <h2>Équipe red team — chaînes d'attaque</h2>
+          <span class="muted small" id="agents-stats"></span>
+        </div>
+        <p class="muted small" id="agents-narrative"></p>
+        <div class="chains" id="agents-chains"></div>
+        <details id="agents-details" hidden>
+          <summary>Prochaines vérifications manuelles</summary>
+          <ol class="next-steps" id="agents-next"></ol>
+          <p class="doctrine" id="agents-doctrine"></p>
+        </details>
+      </article>
 
       <article class="panel" id="situation-panel" data-tab="situation" hidden>
         <div class="panel-head">

@@ -19,6 +19,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from . import config, credentials, db, remediation, reporting, verify
+from .agents import run_team
 from .models import Severity
 from .safety import ScanError, normalize_target
 from .scanner.engine import run_scan
@@ -70,6 +71,38 @@ def _print_summary(report) -> None:
                 f"  {finding.severity.value.upper():8} {finding.title}{danger}",
                 file=sys.stderr,
             )
+
+
+async def _agents_command(args: argparse.Namespace) -> int:
+    """Fait délibérer l'équipe d'agents sur un rapport déjà stocké."""
+    await db.init()
+    report = await db.get_scan(args.scan_id)
+    if report is None:
+        print(f"Analyse introuvable : {args.scan_id}", file=sys.stderr)
+        return EXIT_ERROR
+
+    plan = report.get("attack_plan") or run_team(report)
+    if args.json:
+        print(json.dumps(plan, ensure_ascii=False, indent=2))
+        return EXIT_OK
+
+    print(f"\nÉquipe red team — {report.get('final_url') or report.get('target')}", file=sys.stderr)
+    print(plan.get("narrative", ""), file=sys.stderr)
+    for chain in plan.get("chains") or []:
+        print(
+            f"\n  [{chain['score']}/10] {chain['title']} — difficulté {chain['difficulty']} "
+            f"({chain['confidence']:.0%})",
+            file=sys.stderr,
+        )
+        for index, step in enumerate(chain["steps"], start=1):
+            print(f"    {index}. {step['stage_label']} — {step['claim']}", file=sys.stderr)
+        print(f"    Impact : {' · '.join(chain['impact'])}", file=sys.stderr)
+    if plan.get("next_steps"):
+        print("\nVérifications manuelles :", file=sys.stderr)
+        for item in plan["next_steps"]:
+            print(f"  · {item['action']}", file=sys.stderr)
+    print(f"\n{plan.get('doctrine', '')}", file=sys.stderr)
+    return EXIT_OK
 
 
 async def _watch_command(args: argparse.Namespace) -> int:
@@ -219,6 +252,14 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--verbose", "-v", action="store_true", help="Afficher la progression")
     scan.add_argument("--quiet", "-q", action="store_true", help="N'afficher que le rapport")
 
+    agents_parser = sub.add_parser(
+        "agents", help="Rejouer l'équipe d'agents sur une analyse enregistrée"
+    )
+    agents_parser.add_argument("scan_id", help="Identifiant de l'analyse (voir « scans »)")
+    agents_parser.add_argument(
+        "--json", action="store_true", help="Sortie JSON complète (hypothèses, chaînes, journal)"
+    )
+
     watch_parser = sub.add_parser("watch", help="Gérer la surveillance planifiée")
     watch_sub = watch_parser.add_subparsers(dest="watch_command", required=True)
 
@@ -279,6 +320,9 @@ def _render(report_dict: dict, fmt: str) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.command == "agents":
+        return asyncio.run(_agents_command(args))
 
     if args.command == "watch":
         return asyncio.run(_watch_command(args))

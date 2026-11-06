@@ -255,6 +255,24 @@ docker run -p 127.0.0.1:8000:8000 -e VULNLENS_TOKEN -e VULNLENS_TRUST_PROXY vuln
 
 ---
 
+## Équipe d'agents red team (v6.6) — surface d'attaque nulle par construction
+
+L'équipe d'agents (`app/agents/`) est une fonction pure : `run_team(report)` reçoit un rapport
+**déjà produit** et rend un plan. Elle n'ouvre aucune connexion, ne lit aucun fichier de la cible
+et n'écrit rien hors du rapport. Trois garde-fous mesurables :
+
+- **Pas de réseau** : les modules `app/agents/*` n'importent ni `httpx`, ni `socket`, ni `asyncio`.
+  Un test substitue `socket.socket`, `socket.create_connection` et `socket.getaddrinfo` par des
+  fonctions qui échouent, puis fait tourner l'équipe complète : la délibération aboutit.
+- **Pas de charge** : les textes produits sont des affirmations et des vérifications manuelles.
+  Un test refuse toute sortie contenant `curl`, `wget`, `<script`, `DROP TABLE`, `' OR 1=1`,
+  `POST ` ou `payload=`.
+- **Déterminisme** : mêmes preuves, même plan (à la durée près). Une sortie qui varie sans
+  nouvelle preuve serait un signe de fuite d'information non maîtrisée.
+
+Une hypothèse de l'équipe n'est **jamais** une confirmation : elle reste soumise à la vérification
+humaine et, pour un test actif, à un mandat écrit et à des comptes de test dédiés.
+
 ## Ce qui a été vérifié et n'est pas vulnérable
 
 - **Injection SQL** : toutes les requêtes de `app/db.py` sont paramétrées (aucune

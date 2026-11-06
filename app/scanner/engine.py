@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from urllib.parse import urlsplit, urlunsplit
 
 from .. import attack, config, credentials, narrative, standards, verify
+from ..agents import run_team
 from ..models import CheckResult, Finding, ScanReport
 from ..safety import ScanError, validate_target
 from . import (
@@ -61,6 +62,7 @@ STEPS = [
     ("access", "Contrôle d'accès : IDOR, privilèges, paramètres"),
     ("libs", "Bibliothèques front-end et versions corrigées"),
     ("deep", "Contrôles approfondis (AXFR, sous-domaines, redirections)"),
+    ("redteam", "Équipe d'agents : hypothèses et chaînes d'attaque"),
     ("score", "Calcul du score et du rapport"),
 ]
 
@@ -535,8 +537,28 @@ async def run_scan(
                 finding.cvss_vector = standard.vector
         report.requests = list(fetcher.log)
         report.requests_summary = fetcher.summary()
-        report.duration_ms = int((time.perf_counter() - started) * 1000)
         report.executive = narrative.build(report.to_dict())
+        await advance("redteam", 97, "Équipe d'agents : délibération et chaînes d'attaque")
+        try:
+            report.attack_plan = run_team(report.to_dict())
+            checks.append(
+                CheckResult(
+                    "redteam",
+                    "Équipe d'agents",
+                    detail=(
+                        f"{report.attack_plan['stats']['hypotheses']} hypothèse(s), "
+                        f"{report.attack_plan['stats']['chains']} chaîne(s)"
+                    ),
+                    findings=[],
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            checks.append(
+                CheckResult(
+                    "redteam", "Équipe d'agents", status="error", detail=f"Phase interrompue : {exc}"
+                )
+            )
+        report.duration_ms = int((time.perf_counter() - started) * 1000)
 
     await emit({"type": "result", "percent": 100, "report": report.to_dict()})
     return report

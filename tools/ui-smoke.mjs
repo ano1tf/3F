@@ -57,6 +57,27 @@ const report = {
   triage_summary: { counts: { "a-verifier": 1, confirme: 1, "faux-positif": 0, "risque-accepte": 0 },
                     triaged: 1, untriaged: 1, total: 2 },
   score_after_triage: 55, grade_after_triage: "D",
+  attack_plan: {
+    available: true,
+    narrative: "2 chaîne(s) d'exploitation étayée(s). La plus dangereuse : « Compromission de l'infrastructure ».",
+    chains: [{
+      id: "chain:infrastructure", title: "Compromission de l'infrastructure",
+      summary: "Le dépôt Git mène aux secrets de production.", score: 4.41, confidence: 0.7,
+      difficulty: "faible", impact: ["Code source et historique Git", "Infrastructure cloud"],
+      techniques: ["T1213.003"],
+      steps: [
+        { id: "exposure:source:git", stage: "access", stage_label: "Accès initial", claim: "Le dépôt Git est récupérable.",
+          confidence: 0.9, asset: "Code source et historique Git", techniques: ["T1213.003"],
+          verification: "Télécharger .git/HEAD uniquement.", agent: "exposure" },
+        { id: "exposure:infra:takeover", stage: "escalation", stage_label: "Élévation de privilèges",
+          claim: "Un état Terraform traîne en ligne.", confidence: 0.7, asset: "Infrastructure cloud",
+          techniques: ["T1078"], verification: "Vérifier l'actif du secret.", agent: "exposure" },
+      ],
+    }],
+    next_steps: [{ hypothesis: "exposure:source:git", action: "Télécharger .git/HEAD uniquement.", asset: "Code source et historique Git", confidence: "90%" }],
+    stats: { hypotheses: 6, chains: 1, confidence: 0.72 },
+    doctrine: "Aucun agent n'exécute d'exploit.",
+  },
   executive: {
     risk_level: "élevé", headline: "1 faille critique donne un accès immédiat.",
     paragraph: "Analyse de 2 pages et de 11 familles de contrôles.",
@@ -198,6 +219,16 @@ setTimeout(() => {
   check("puce de verdict", [...document.querySelectorAll(".verdict-chip")].some((c) => !c.hidden && c.textContent === "Confirmé"));
   check("barre de triage visible", document.querySelector("#triage-bar").hidden === false);
   check("score après triage", document.querySelector("#triage-score").textContent.includes("55/100"));
+
+  // équipe red team
+  check("panneau red team visible", document.querySelector("#agents-panel").hidden === false);
+  check("chaîne rendue", document.querySelectorAll("#agents-chains .chain-card").length === 1);
+  check("score de chaîne", document.querySelector("#agents-chains .chain-score").textContent === "4.41/10");
+  check("étapes de chaîne", document.querySelectorAll("#agents-chains .chain-steps li").length === 2);
+  check("étiquette d'étape", document.querySelector("#agents-chains .chain-steps .stage").textContent === "Accès initial");
+  check("actifs de la chaîne", document.querySelectorAll("#agents-chains .asset-chip").length === 2);
+  check("statistiques d'équipe", document.querySelector("#agents-stats").textContent.includes("6 hypothèses"));
+  check("vérifications manuelles", document.querySelectorAll("#agents-next li").length === 1);
 
   const select = document.querySelector('.finding[data-id="exposure.git"] .verdict-select');
   check("contrôles de triage rendus", select !== null);

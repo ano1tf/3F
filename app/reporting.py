@@ -165,6 +165,16 @@ def to_sarif(report: dict[str, Any]) -> dict[str, Any]:
                     "requests": report.get("requests_summary") or {},
                     "triage": report.get("triage_summary") or {},
                     "scoreAfterTriage": report.get("score_after_triage"),
+                    "attackChains": [
+                        {
+                            "id": chain.get("id"),
+                            "title": chain.get("title"),
+                            "score": chain.get("score"),
+                            "impact": chain.get("impact", []),
+                            "techniques": chain.get("techniques", []),
+                        }
+                        for chain in (report.get("attack_plan") or {}).get("chains") or []
+                    ],
                 },
             }
         ],
@@ -220,6 +230,36 @@ def to_markdown(report: dict[str, Any]) -> str:
             lines += [f"- {item}" for item in executive["reachable"]]
             lines.append("")
 
+
+    plan_agents = report.get("attack_plan") or {}
+    if plan_agents.get("available") and plan_agents.get("chains"):
+        lines += ["## Lecture red team — chaînes d'attaque", ""]
+        lines.append(plan_agents.get("narrative", ""))
+        lines.append("")
+        for chain in plan_agents["chains"]:
+            lines.append(
+                f"### {chain.get('title')} — score {chain.get('score')} "
+                f"(confiance {chain.get('confidence', 0):.0%}, difficulté {chain.get('difficulty', '')})"
+            )
+            lines.append(f"_{chain.get('summary', '')}_")
+            lines.append("")
+            for step_index, step in enumerate(chain.get("steps") or [], start=1):
+                techniques = ", ".join(step.get("techniques") or [])
+                lines.append(
+                    f"{step_index}. **{step.get('stage_label', '')}** — {step.get('claim', '')} "
+                    f"({step.get('confidence', 0):.0%}{', ' + techniques if techniques else ''})"
+                )
+            lines.append(f"**Impact** : {' · '.join(chain.get('impact') or [])}")
+            lines.append("")
+        if plan_agents.get("next_steps"):
+            lines.append("### Vérifications manuelles à mener")
+            lines += [
+                f"- {item['action']} _(confiance {item['confidence']})_"
+                for item in plan_agents["next_steps"]
+            ]
+            lines.append("")
+        lines.append(f"> {plan_agents.get('doctrine', '')}")
+        lines.append("")
 
     triage_summary = report.get("triage_summary") or {}
     if triage_summary.get("triaged"):
@@ -719,6 +759,67 @@ def to_html(report: dict[str, Any]) -> str:
             f'<div class="situation-grid">{"".join(cards)}</div>'
         )
 
+    plan_agents = report.get("attack_plan") or {}
+    agents_html = ""
+    if plan_agents.get("available") and plan_agents.get("chains"):
+        cards = []
+        for chain in plan_agents["chains"]:
+            steps = "".join(
+                f'<li><span class="stage">{_e(step.get("stage_label", ""))}</span>'
+                f'<span class="claim">{_e(step.get("claim", ""))}</span>'
+                f'<span class="conf" title="Confiance de l\'hypothèse">'
+                f'{step.get("confidence", 0):.0%}</span>'
+                f'<em class="mitre">{_e(", ".join(step.get("techniques") or []))}</em></li>'
+                for step in chain.get("steps") or []
+            )
+            impact = "".join(
+                f'<span class="asset-chip">{_e(asset)}</span>' for asset in chain.get("impact") or []
+            )
+            cards.append(
+                f'<article class="chain-card">'
+                f'<header><h3>{_e(chain.get("title", ""))}</h3>'
+                f'<span class="chain-score">{chain.get("score")}/10</span></header>'
+                f'<p class="chain-summary">{_e(chain.get("summary", ""))}</p>'
+                f'<ol class="chain-steps">{steps}</ol>'
+                f'<p class="chain-meta">Difficulté {_e(chain.get("difficulty", ""))} · '
+                f'confiance {chain.get("confidence", 0):.0%} · '
+                f'{len(chain.get("steps") or [])} étape(s)</p>'
+                f'<p class="chain-impact">{impact}</p>'
+                f"</article>"
+            )
+        next_steps = "".join(
+            f'<li>{_e(item.get("action", ""))} '
+            f'<em>(confiance {_e(item.get("confidence", ""))})</em></li>'
+            for item in plan_agents.get("next_steps") or []
+        )
+        dissent = "".join(
+            f'<li><code>{_e(item.get("hypothesis", ""))}</code> — {_e(item.get("reason", ""))}</li>'
+            for item in plan_agents.get("dissent") or []
+        )
+        trace = "".join(
+            f'<li><span class="who">{_e(entry.get("agent", ""))}</span> {_e(entry.get("message", ""))}</li>'
+            for entry in (plan_agents.get("trace") or [])[:60]
+        )
+        details = ""
+        if dissent or trace:
+            details = (
+                '<details><summary>Délibération de l\'équipe</summary>'
+                + (f'<h4>Hypothèses écartées</h4><ul class="dissent">{dissent}</ul>' if dissent else "")
+                + (f'<h4>Journal</h4><ul class="trace">{trace}</ul>' if trace else "")
+                + "</details>"
+            )
+        agents_html = f"""
+  <h2>Équipe red team — chaînes d'attaque</h2>
+  <p class="sit-intro">{_e(plan_agents.get("narrative", ""))}</p>
+  <div class="chains">{"".join(cards)}</div>
+  <div class="panel">
+    <h3>Vérifications manuelles à mener</h3>
+    <ol class="next-steps">{next_steps}</ol>
+    {details}
+    <p class="doctrine">{_e(plan_agents.get("doctrine", ""))}</p>
+  </div>
+"""
+
     third_html = ""
     if report.get("third_parties"):
         rows = "".join(
@@ -837,6 +938,29 @@ def to_html(report: dict[str, Any]) -> str:
   .verdict-pill[data-verdict="faux-positif"], .verdict-chip[data-verdict="faux-positif"] {{ background:#f4f4f5; border-color:#d4d4d8; color:#52525b; }}
   .verdict-pill[data-verdict="risque-accepte"], .verdict-chip[data-verdict="risque-accepte"] {{ background:#fef3e2; border-color:#f3d19b; color:#8a5a12; }}
   .verdict-line {{ margin:6px 0 0; font-size:12.5px; color:#475569; }}
+  .chains {{ display:grid; gap:12px; margin:10px 0 18px; }}
+  .chain-card {{ border:1px solid #e2e8f0; border-left:4px solid #0ea5b7; border-radius:10px;
+                 padding:12px 16px; background:#fff; box-shadow:0 1px 2px rgba(15,23,42,.05); }}
+  .chain-card header {{ display:flex; align-items:baseline; gap:10px; }}
+  .chain-card h3 {{ margin:0; font-size:15px; }}
+  .chain-score {{ margin-left:auto; font-weight:800; color:#0b4f6c; }}
+  .chain-summary {{ margin:6px 0 8px; font-size:12.5px; color:#475569; }}
+  .chain-steps {{ list-style:none; padding:0; margin:0 0 8px; display:grid; gap:6px; }}
+  .chain-steps li {{ display:grid; grid-template-columns:130px 1fr 46px; gap:10px;
+                     align-items:baseline; font-size:12.5px; padding:6px 0;
+                     border-top:1px dashed #e2e8f0; }}
+  .chain-steps .stage {{ font-weight:700; color:#0b4f6c; font-size:11.5px; text-transform:uppercase; letter-spacing:.03em; }}
+  .chain-steps .conf {{ text-align:right; font-weight:700; color:#0f766e; }}
+  .chain-steps .mitre {{ grid-column:2 / 4; color:#94a3b8; font-size:11px; font-style:normal; }}
+  .chain-meta {{ margin:0 0 6px; font-size:11.5px; color:#94a3b8; }}
+  .chain-impact {{ margin:0; display:flex; flex-wrap:wrap; gap:6px; }}
+  .asset-chip {{ background:#eef7fb; border:1px solid #cfe6f0; color:#0b4f6c; border-radius:999px;
+                 padding:2px 9px; font-size:11px; font-weight:600; }}
+  .next-steps {{ margin:6px 0 10px; padding-left:18px; font-size:12.5px; color:#334155; }}
+  .next-steps em {{ color:#94a3b8; font-style:normal; }}
+  .dissent, .trace {{ font-size:11.5px; color:#64748b; padding-left:18px; margin:4px 0 10px; }}
+  .trace .who {{ font-weight:700; color:#0b4f6c; }}
+  .doctrine {{ margin:10px 0 0; font-size:11.5px; color:#64748b; border-left:3px solid #cbd5e1; padding-left:10px; }}
   .triage-score {{ margin:8px 0 0; font-size:13px; color:#0b4f6c; }}
   .req-summary .ok {{ color:#0f766e; font-weight:600; }}
   .req-summary .warn {{ color:#b45309; font-weight:600; }}
@@ -937,6 +1061,7 @@ def to_html(report: dict[str, Any]) -> str:
 
   {executive_html}
 {situation_html}
+{agents_html}
 {plan_html}
 {diff_html}
 {pages_html}
