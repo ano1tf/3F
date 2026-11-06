@@ -296,7 +296,7 @@ docker run -p 127.0.0.1:8000:8000 -e VULNLENS_TOKEN -e VULNLENS_TRUST_PROXY vuln
 
 ```bash
 .venv/bin/python -m pytest tests/test_security.py -v   # 30 tests de durcissement
-.venv/bin/python -m pytest                             # 325 tests
+.venv/bin/python -m pytest                             # 339 tests
 .venv/bin/ruff check .
 npm run ui:check                                       # interface, sans erreur JS
 ```

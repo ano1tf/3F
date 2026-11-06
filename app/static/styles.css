@@ -1296,3 +1296,28 @@ ol.access li { margin: 5px 0; }
                     border: 1px solid var(--border, #24344b); background: rgba(255,255,255,0.03);
                     color: inherit; font-family: var(--mono, ui-monospace, monospace); font-size: 12.5px; }
 .auth-block input:focus { outline: 2px solid rgba(34,211,238,0.4); outline-offset: 1px; }
+
+/* Triage des constats */
+.triage-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
+  margin: 14px 0 6px; padding: 10px 14px; border-radius: 10px;
+  border: 1px solid var(--border, #24344b); background: rgba(255, 255, 255, 0.03);
+  font-size: 12.5px; color: var(--muted);
+}
+.triage-counts { font-weight: 600; color: #d7e6f5; }
+.triage-score { color: #7fd7f2; font-weight: 600; }
+.triage-hide { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; margin-left: auto; }
+.triage-row { display: grid; grid-template-columns: 170px 1fr auto; gap: 10px; align-items: center; }
+.triage-row select, .triage-row input {
+  padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border, #24344b);
+  background: rgba(255, 255, 255, 0.04); color: inherit; font-size: 12.5px;
+}
+.verdict-state { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+.verdict-chip {
+  font-size: 10.5px; font-weight: 700; border-radius: 999px; padding: 2px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18); white-space: nowrap;
+}
+.verdict-chip[data-verdict="confirme"] { color: #34d399; border-color: rgba(52, 211, 153, 0.45); }
+.verdict-chip[data-verdict="faux-positif"] { color: #9aa7b8; border-color: rgba(154, 167, 184, 0.4); }
+.verdict-chip[data-verdict="risque-accepte"] { color: #fbbf24; border-color: rgba(251, 191, 36, 0.45); }
+@media (max-width: 720px) { .triage-row { grid-template-columns: 1fr; } }

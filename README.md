@@ -8,7 +8,7 @@ Aucune exploitation, aucune injection, aucun contournement d'authentification : 
 visiteur peut observer.
 
 ```
-┌ VulnLens v6.4 ─────────────────────────────────────────────────────────────┐
+┌ VulnLens v6.5 ─────────────────────────────────────────────────────────────┐
 │  Risque critique · score 8/100     3 pages · 13 familles de contrôles      │
 ├────────────────────────────────────────────────────────────────────────────┤
 │  « Des accès ou des données sont exposés : à traiter immédiatement. »      │
@@ -18,6 +18,19 @@ visiteur peut observer.
 ```
 
 ---
+
+## Ce que fait la v6.5 — triage des constats
+
+Un scanner produit des constats, un pentester produit un **verdict**. La v6.5 comble cet écart.
+
+| Capacité | Détail |
+|---|---|
+| **Quatre verdicts** | *À vérifier*, *Confirmé*, *Faux positif*, *Risque accepté* — avec une note de justification (500 caractères) reprise telle quelle dans le rapport remis au client. |
+| **Dans l'interface** | Chaque constat porte un sélecteur de verdict et un champ de justification, enregistrés immédiatement. La puce de verdict apparaît dans l'en-tête, une barre de triage affiche la répartition, et une case « Masquer les faux positifs » nettoie la liste. |
+| **Score retenu** | Le score d'origine reste affiché (traçabilité) ; un **score après triage** est calculé en retirant les faux positifs et les risques acceptés. C'est celui que le client retient. |
+| **Persistance** | Stocké par couple (analyse, constat) dans SQLite : le triage est rechargé à l'ouverture de l'historique, supprimé avec l'analyse. Aucune donnée sensible : un verdict et une note. |
+| **SARIF / CI** | Un faux positif devient une `suppression` SARIF : GitHub Code Scanning et consorts cessent de l'afficher, sans casser le suivi des autres constats. |
+| **API** | `GET /api/scans/{id}/triage`, `PUT` et `DELETE /api/scans/{id}/findings/{constat}/triage` : le triage peut être automatisé (import d'un tableur, script de revue). |
 
 ## Ce que fait la v6.4 — prêt pour un pentest
 
@@ -267,6 +280,7 @@ app/
 ├─ narrative.py       synthèse exécutive, niveau de risque, radar, confiance
 ├─ attack.py          rapport de situation : chemin d'accès, révélation, danger 1-10
 ├─ impact.py          ce que chaque faille donne accès (comptes, base, paiements…)
+├─ triage.py          verdicts du pentester, score retenu après triage
 ├─ standards.py       CWE, WSTG et calculateur CVSS 3.1
 ├─ credentials.py     en-tête d'authentification : validation, masquage
 ├─ watch.py           surveillance planifiée (échéances, réanalyse, alertes)
@@ -303,7 +317,7 @@ liste des pages concernées, pour éviter les rapports de 300 lignes répétitiv
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest        # 325 tests (dont 30 de durcissement)
+.venv/bin/python -m pytest        # 339 tests (dont 30 de durcissement)
 .venv/bin/ruff check .
 
 # interface : rendu simulé (jsdom), aucune erreur JavaScript tolérée
@@ -313,7 +327,8 @@ npm run ui:check                  # parcours de scan + tableau de bord / tendanc
 
 Couverture : normalisation et refus de cibles, scoring, en-têtes, contenu, DNS/deep, **bibliothèques front-end**,
 **analyse des JWT**, **contrôle d'accès (IDOR)**, **actifs atteignables**, **CWE/WSTG/CVSS**,
-**en-tête d'authentification** (jamais envoyé aux tiers, jamais reporté), **journal des requêtes**, **crawl**,
+**en-tête d'authentification** (jamais envoyé aux tiers, jamais reporté), **journal des requêtes**,
+**triage et score après triage**, **crawl**,
 **agrégation**, **diff**, **alertes**, **vérification**, **takeover**, **secrets**, **e-mail**,
 **surface tierce**, **plan de remédiation**, **synthèse exécutive**, **surveillance**, **Certificate
 Transparency**, **empreinte technique**, **secrets et expositions élargis**, persistance, API (historique, exports, jeton, diff, plan,
@@ -335,7 +350,7 @@ CLI (`scan`, `verify`, `watch`), et un **test de fumée de l'interface** sous js
 - [x] Journal des requêtes (preuve de non-intrusivité)
 - [x] Scan de la zone authentifiée sans jamais persister le secret
 - [ ] Import d'une portée (`scope.txt`) et d'une liste d'URLs
-- [ ] Triage des constats (confirmé / faux positif) avant export client
+- [x] Triage des constats (confirmé / faux positif / risque accepté) avant export client
 - [ ] Rapport hebdomadaire par e-mail (digest de la surveillance)
 - [ ] Règles personnalisées (`*.yaml`) pour les contrôles maison
 - [ ] Comparaison multi-sites (portefeuille)

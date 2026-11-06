@@ -340,6 +340,7 @@
     renderFingerprint(report.fingerprint || {});
     renderChecks(report.checks || []);
     renderRequests(report);
+    renderTriageBar(report);
 
     if (!options.fromHistory) {
       saveToHistory(report);
@@ -432,8 +433,10 @@
 
     const findings = (currentReport && currentReport.findings) || [];
     const term = searchTerm.toLowerCase();
+    const hideFalsePositives = ($("#hide-false-positives") || {}).checked === true;
     const visible = findings.filter((finding) => {
       const matchSeverity = activeFilter === "all" || finding.severity === activeFilter;
+      const matchVerdict = !(hideFalsePositives && finding.verdict === "faux-positif");
       const haystack = [
         finding.title,
         finding.category,
@@ -444,7 +447,7 @@
       ]
         .join(" ")
         .toLowerCase();
-      return matchSeverity && (!term || haystack.includes(term));
+      return matchSeverity && matchVerdict && (!term || haystack.includes(term));
     });
 
     $("#no-findings").hidden = visible.length > 0;
@@ -491,6 +494,16 @@
         stdChip.textContent = stdLine;
         stdChip.title = finding.cvss_vector || "";
       }
+
+      const verdictChip = $(".verdict-chip", node);
+      if (finding.verdict && finding.verdict !== "a-verifier") {
+        verdictChip.hidden = false;
+        verdictChip.dataset.verdict = finding.verdict;
+        verdictChip.textContent = finding.verdict_label || VERDICT_LABELS[finding.verdict] || finding.verdict;
+        verdictChip.title = finding.verdict_note || "";
+      }
+
+      renderTriageControls(node, finding);
 
       const confidence = $(".confidence", node);
       if (finding.confidence && finding.confidence !== "certain") {
@@ -578,6 +591,88 @@
     });
   }
 
+
+  /* ------------------------------- Triage -------------------------------- */
+
+  const VERDICT_LABELS = {
+    "a-verifier": "À vérifier",
+    confirme: "Confirmé",
+    "faux-positif": "Faux positif",
+    "risque-accepte": "Risque accepté",
+  };
+
+  function renderTriageControls(node, finding) {
+    const block = $(".triage-controls", node);
+    const scanId = currentReport && currentReport.scan_id;
+    if (!block) return;
+    if (!scanId) {
+      block.hidden = true;
+      return;
+    }
+    block.hidden = false;
+    const select = $(".verdict-select", node);
+    const note = $(".verdict-note", node);
+    const state = $(".verdict-state", node);
+    select.value = finding.verdict || "a-verifier";
+    note.value = finding.verdict_note || "";
+
+    const save = async () => {
+      state.textContent = "Enregistrement…";
+      try {
+        const response = await fetch(
+          `/api/scans/${encodeURIComponent(scanId)}/findings/${encodeURIComponent(finding.id)}/triage`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ verdict: select.value, note: note.value }),
+          }
+        );
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error || payload.detail || `HTTP ${response.status}`);
+        finding.verdict = payload.verdict;
+        finding.verdict_label = payload.label;
+        finding.verdict_note = payload.note;
+        currentReport.triage_summary = payload.summary || {};
+        currentReport.score_after_triage = payload.score_after_triage;
+        currentReport.grade_after_triage = payload.grade_after_triage;
+        state.textContent = "Enregistré ✓";
+        renderTriageBar(currentReport);
+        renderFindings();
+        switchTab("constats");
+      } catch (error) {
+        state.textContent = `Échec : ${error.message}`;
+      }
+    };
+
+    select.addEventListener("change", save);
+    note.addEventListener("change", save);
+  }
+
+  function renderTriageBar(report) {
+    const bar = $("#triage-bar");
+    if (!bar) return;
+    const summary = (report && report.triage_summary) || {};
+    const counts = summary.counts || {};
+    const triaged = summary.triaged || 0;
+    if (!triaged) {
+      bar.hidden = true;
+      return;
+    }
+    bar.hidden = false;
+    $("#triage-counts").textContent = [
+      ["Conf.", counts.confirme || 0],
+      ["Faux pos.", counts["faux-positif"] || 0],
+      ["Acceptés", counts["risque-accepte"] || 0],
+      ["À vérifier", counts["a-verifier"] || 0],
+    ]
+      .map(([label, value]) => `${label} : ${value}`)
+      .join(" · ");
+    const score = report.score_after_triage;
+    $("#triage-score").textContent =
+      score === null || score === undefined
+        ? ""
+        : `Score retenu après triage : ${score}/100 (note ${report.grade_after_triage || "?"})`;
+  }
 
   /* --------------------------- Journal des requêtes ----------------------- */
 
@@ -1956,6 +2051,9 @@
     searchTerm = event.target.value.trim();
     renderFindings();
   });
+
+  const hideFp = $("#hide-false-positives");
+  if (hideFp) hideFp.addEventListener("change", () => renderFindings());
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "/" && !["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) {

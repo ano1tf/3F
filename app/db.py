@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from .triage import VERDICTS as TRIAGE_LABELS
+
 DB_PATH = Path(os.getenv("VULNLENS_DB", "data/vulnlens.db"))
 
 SCHEMA = """
@@ -44,6 +46,16 @@ CREATE TABLE IF NOT EXISTS verifications (
     created_at    TEXT NOT NULL,
     verified_at   TEXT
 );
+
+CREATE TABLE IF NOT EXISTS triage (
+    scan_id    TEXT NOT NULL,
+    finding_id TEXT NOT NULL,
+    verdict    TEXT NOT NULL,
+    note       TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (scan_id, finding_id)
+);
+CREATE INDEX IF NOT EXISTS idx_triage_scan ON triage(scan_id);
 
 CREATE TABLE IF NOT EXISTS watchlist (
     host           TEXT PRIMARY KEY,
@@ -186,7 +198,9 @@ def _get_sync(scan_id: str) -> dict[str, Any] | None:
         return None
     report = json.loads(row["report"])
     report["profile"] = row["profile"]
-    return report
+    from . import triage as triage_module
+
+    return triage_module.merge(report, _triage_sync(scan_id))
 
 
 async def get_scan(scan_id: str) -> dict[str, Any] | None:
@@ -195,6 +209,7 @@ async def get_scan(scan_id: str) -> dict[str, Any] | None:
 
 def _delete_sync(scan_id: str) -> bool:
     with _connect() as conn:
+        conn.execute("DELETE FROM triage WHERE scan_id = ?", (scan_id,))
         cursor = conn.execute("DELETE FROM scans WHERE id = ?", (scan_id,))
         return cursor.rowcount > 0
 
@@ -334,6 +349,71 @@ def _is_verified_sync(host: str) -> bool:
 
 async def is_verified(host: str) -> bool:
     return await asyncio.to_thread(_is_verified_sync, host)
+
+
+# --------------------------------------------------------------------------- #
+# Triage des constats
+# --------------------------------------------------------------------------- #
+
+
+def _triage_sync(scan_id: str) -> dict[str, dict[str, Any]]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT finding_id, verdict, note, updated_at FROM triage WHERE scan_id = ?",
+            (scan_id,),
+        ).fetchall()
+    return {
+        row["finding_id"]: {
+            "verdict": row["verdict"],
+            "label": TRIAGE_LABELS.get(row["verdict"], row["verdict"]),
+            "note": row["note"],
+            "updated_at": row["updated_at"],
+        }
+        for row in rows
+    }
+
+
+async def triage_for(scan_id: str) -> dict[str, dict[str, Any]]:
+    return await asyncio.to_thread(_triage_sync, scan_id)
+
+
+def _set_triage_sync(
+    scan_id: str, finding_id: str, verdict: str, note: str, updated_at: str
+) -> dict[str, dict[str, Any]]:
+    stamp = updated_at or datetime.now(UTC).isoformat(timespec="seconds")
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO triage (scan_id, finding_id, verdict, note, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(scan_id, finding_id) DO UPDATE SET
+                verdict = excluded.verdict,
+                note = excluded.note,
+                updated_at = excluded.updated_at
+            """,
+            (scan_id, finding_id, verdict, note, stamp),
+        )
+    return _triage_sync(scan_id)
+
+
+async def set_triage(
+    scan_id: str, finding_id: str, verdict: str, note: str = "", updated_at: str = ""
+) -> dict[str, dict[str, Any]]:
+    return await asyncio.to_thread(
+        _set_triage_sync, scan_id, finding_id, verdict, note, updated_at
+    )
+
+
+def _clear_triage_sync(scan_id: str, finding_id: str) -> dict[str, dict[str, Any]]:
+    with _connect() as conn:
+        conn.execute(
+            "DELETE FROM triage WHERE scan_id = ? AND finding_id = ?", (scan_id, finding_id)
+        )
+    return _triage_sync(scan_id)
+
+
+async def clear_triage(scan_id: str, finding_id: str) -> dict[str, dict[str, Any]]:
+    return await asyncio.to_thread(_clear_triage_sync, scan_id, finding_id)
 
 
 # --------------------------------------------------------------------------- #

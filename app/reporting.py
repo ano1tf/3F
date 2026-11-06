@@ -86,8 +86,7 @@ def to_sarif(report: dict[str, Any]) -> dict[str, Any]:
 
     results = []
     for finding in findings:
-        results.append(
-            {
+        result = {
                 "ruleId": finding["id"],
                 "level": SARIF_LEVEL.get(finding["severity"], "note"),
                 "message": {
@@ -115,9 +114,21 @@ def to_sarif(report: dict[str, Any]) -> dict[str, Any]:
                     "wstg": finding.get("wstg", ""),
                     "cvss": finding.get("cvss", 0.0),
                     "cvss-vector": finding.get("cvss_vector", ""),
+                    "verdict": finding.get("verdict", ""),
+                    "verdict-note": finding.get("verdict_note", ""),
                 },
             }
-        )
+        # Un faux positif écarté par le pentester est supprimé au sens SARIF :
+        # les plateformes (GitHub Code Scanning…) cessent alors de l'afficher.
+        if finding.get("verdict") == "faux-positif":
+            result["suppressions"] = [
+                {
+                    "kind": "external",
+                    "status": "accepted",
+                    "justification": finding.get("verdict_note") or "Écarté après vérification.",
+                }
+            ]
+        results.append(result)
 
     return {
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
@@ -152,6 +163,8 @@ def to_sarif(report: dict[str, Any]) -> dict[str, Any]:
                     "authUsed": bool(report.get("auth_used")),
                     "authKind": report.get("auth_kind", ""),
                     "requests": report.get("requests_summary") or {},
+                    "triage": report.get("triage_summary") or {},
+                    "scoreAfterTriage": report.get("score_after_triage"),
                 },
             }
         ],
@@ -163,7 +176,13 @@ def to_markdown(report: dict[str, Any]) -> str:
     lines = [
         f"# Rapport VulnLens — {report.get('final_url') or report.get('target')}",
         "",
-        f"- **Score** : {report.get('score')}/100 (note {report.get('grade')})",
+        f"- **Score** : {report.get('score')}/100 (note {report.get('grade')})"
+        + (
+            f" — après triage : {report['score_after_triage']}/100 "
+            f"(note {report.get('grade_after_triage') or '?'})"
+            if report.get("score_after_triage") is not None
+            else ""
+        ),
         f"- **Cible** : {report.get('final_url') or report.get('target')}",
         f"- **Date** : {report.get('started_at', '')}",
         f"- **Durée** : {report.get('duration_ms', 0)} ms",
@@ -200,6 +219,33 @@ def to_markdown(report: dict[str, Any]) -> str:
             lines.append("### Ce que l'attaquant peut atteindre")
             lines += [f"- {item}" for item in executive["reachable"]]
             lines.append("")
+
+
+    triage_summary = report.get("triage_summary") or {}
+    if triage_summary.get("triaged"):
+        counts_triage = triage_summary.get("counts") or {}
+        detail = " · ".join(
+            f"{value} {label.lower()}"
+            for key, label in (
+                ("confirme", "Confirmé(s)"),
+                ("faux-positif", "Faux positif(s)"),
+                ("risque-accepte", "Risque accepté"),
+                ("a-verifier", "À vérifier"),
+            )
+            for value in [counts_triage.get(key, 0)]
+            if value
+        )
+        lines += ["## Triage", ""]
+        lines.append(
+            f"- {triage_summary.get('triaged', 0)} constat(s) trié(s) sur "
+            f"{triage_summary.get('total', 0)} : {detail}."
+        )
+        if report.get("score_after_triage") is not None:
+            lines.append(
+                f"- Score retenu après triage : **{report['score_after_triage']}/100** "
+                f"(note {report.get('grade_after_triage', '?')})."
+            )
+        lines.append("")
 
     plan = remediation.build_plan(report)
     if plan["available"]:
@@ -281,6 +327,9 @@ def to_markdown(report: dict[str, Any]) -> str:
             lines += [f"**Ce que ça révèle :** {finding['reveals']}", ""]
         if finding.get("grants"):
             lines += [f"**Donne accès à :** {' · '.join(finding['grants'])}", ""]
+        if finding.get("verdict"):
+            note = f" — « {finding['verdict_note']} »" if finding.get("verdict_note") else ""
+            lines += [f"**Verdict :** {finding.get('verdict_label', '')}{note}", ""]
         if finding.get("evidence"):
             lines += ["```", finding["evidence"], "```", ""]
         if finding.get("remediation"):
@@ -436,6 +485,16 @@ def to_html(report: dict[str, Any]) -> str:
             if standard_line
             else ""
         )
+        if finding.get("verdict"):
+            note = finding.get("verdict_note") or ""
+            note_html = f' « {_e(note)} »' if note else ""
+            verdict_html = (
+                f'<p class="verdict-line"><span class="verdict-chip" '
+                f'data-verdict="{_e(finding["verdict"])}">'
+                f'{_e(finding.get("verdict_label", ""))}</span>{note_html}</p>'
+            )
+        else:
+            verdict_html = ""
         findings_html.append(
             f"""
         <article class="finding" style="border-left-color:{color}">
@@ -449,6 +508,7 @@ def to_html(report: dict[str, Any]) -> str:
             {f'<span class="conf">{_e("à vérifier" if finding.get("confidence") == "probable" else "à confirmer")}</span>' if finding.get("confidence") not in (None, "certain") else ""}
           </header>
           <p class="desc">{_e(finding.get("description", ""))}</p>
+          {verdict_html}
           {f'''<div class="find-danger">{_danger_meter(finding.get("danger", 0), finding.get("danger_label", ""))}</div>
           <div class="block"><h4>Comment y arriver</h4><ol class="sit-steps">{"".join(f"<li>{_e(step)}</li>" for step in finding.get("access") or [])}</ol></div>
           <div class="block"><h4>Ce que ça révèle</h4><p class="sit-reveals">{_e(finding.get("reveals", ""))}</p>{f'<p class="sit-grants"><strong>Donne accès à :</strong> {_e(" · ".join(finding["grants"]))}</p>' if finding.get("grants") else ""}</div>''' if finding.get("danger") else ""}
@@ -542,6 +602,38 @@ def to_html(report: dict[str, Any]) -> str:
         pages_html = f'''
   <h2>Pages analysées ({len(pages)})</h2>
   <div class="panel"><ul class="pages">{rows}</ul></div>'''
+
+
+    triage_summary = report.get("triage_summary") or {}
+    triage_html = ""
+    if triage_summary.get("triaged"):
+        counts_triage = triage_summary.get("counts") or {}
+        chips = "".join(
+            f'<li class="verdict-pill" data-verdict="{key}">{label} : '
+            f'<strong>{count}</strong></li>'
+            for key, label, count in (
+                ("confirme", "Confirmés", counts_triage.get("confirme", 0)),
+                ("faux-positif", "Faux positifs", counts_triage.get("faux-positif", 0)),
+                ("risque-accepte", "Risque accepté", counts_triage.get("risque-accepte", 0)),
+                ("a-verifier", "À vérifier", counts_triage.get("a-verifier", 0)),
+            )
+            if count
+        )
+        score_triage = report.get("score_after_triage")
+        score_html = (
+            f'<p class="triage-score">Score retenu après triage : '
+            f'<strong>{score_triage}/100</strong> '
+            f'(note {_e(report.get("grade_after_triage", "?"))})</p>'
+            if score_triage is not None
+            else ""
+        )
+        triage_html = f"""  <h2>Triage</h2>
+  <div class="panel">
+    <p class="meta">{triage_summary.get('triaged', 0)} constat(s) trié(s) sur {triage_summary.get('total', 0)}.</p>
+    <ul class="triage-pills">{chips}</ul>
+    {score_html}
+  </div>
+"""
 
     plan = remediation.build_plan(report)
 
@@ -738,6 +830,14 @@ def to_html(report: dict[str, Any]) -> str:
          color:#0b4f6c; background:#eef7fb; border:1px solid #cfe6f0; border-radius:4px;
          padding:2px 6px; white-space:nowrap; }}
   .req-summary {{ margin:6px 0 10px; padding-left:18px; font-size:12.5px; color:#334155; }}
+  .triage-pills {{ list-style:none; display:flex; flex-wrap:wrap; gap:8px; padding:0; margin:6px 0 0; }}
+  .verdict-pill, .verdict-chip {{ border-radius:999px; padding:3px 10px; font-size:11.5px; font-weight:700;
+        border:1px solid #cbd5e1; background:#f1f5f9; color:#334155; }}
+  .verdict-pill[data-verdict="confirme"], .verdict-chip[data-verdict="confirme"] {{ background:#e6f6ee; border-color:#a7e0c3; color:#0f6b45; }}
+  .verdict-pill[data-verdict="faux-positif"], .verdict-chip[data-verdict="faux-positif"] {{ background:#f4f4f5; border-color:#d4d4d8; color:#52525b; }}
+  .verdict-pill[data-verdict="risque-accepte"], .verdict-chip[data-verdict="risque-accepte"] {{ background:#fef3e2; border-color:#f3d19b; color:#8a5a12; }}
+  .verdict-line {{ margin:6px 0 0; font-size:12.5px; color:#475569; }}
+  .triage-score {{ margin:8px 0 0; font-size:13px; color:#0b4f6c; }}
   .req-summary .ok {{ color:#0f766e; font-weight:600; }}
   .req-summary .warn {{ color:#b45309; font-weight:600; }}
   details summary {{ cursor:pointer; font-size:12.5px; font-weight:600; color:#0b4f6c; }}
@@ -830,6 +930,8 @@ def to_html(report: dict[str, Any]) -> str:
   </p>
 
   <div class="cells">{summary_cells}</div>
+
+  {triage_html}
 
   {f'<h2>À corriger en priorité</h2><div class="panel"><ol class="priority">{priority_html}</ol></div>' if priority_html else ""}
 
