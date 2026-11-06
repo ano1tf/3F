@@ -8,8 +8,8 @@ Aucune exploitation, aucune injection, aucun contournement d'authentification : 
 visiteur peut observer.
 
 ```
-┌ VulnLens v6.0 ─────────────────────────────────────────────────────────────┐
-│  Risque critique · score 8/100     3 pages · 11 familles de contrôles      │
+┌ VulnLens v6.4 ─────────────────────────────────────────────────────────────┐
+│  Risque critique · score 8/100     3 pages · 13 familles de contrôles      │
 ├────────────────────────────────────────────────────────────────────────────┤
 │  « Des accès ou des données sont exposés : à traiter immédiatement. »      │
 │  Ce qui expose : clé AWS dans app.js · .env public · source map publiée    │
@@ -18,6 +18,56 @@ visiteur peut observer.
 ```
 
 ---
+
+## Ce que fait la v6.4 — prêt pour un pentest
+
+| Capacité | Détail |
+|---|---|
+| **Zone authentifiée** | Champ optionnel dans l'interface (`Authorization: Bearer …` ou `Cookie: session=…`), option `--auth` / `--auth-env` en CLI, champ `auth` dans l'API. L'en-tête n'est envoyé **qu'à l'hôte analysé** — jamais après une redirection vers un domaine tiers, jamais vers un CDN — et il n'apparaît ni dans le rapport, ni dans l'historique, ni dans le journal. Le rapport indique seulement `Scan authentifié (bearer/cookie)`. |
+| **CWE + WSTG + CVSS 3.1** | Chaque constat cite le CWE (nature technique), le test OWASP WSTG correspondant et un **vecteur CVSS 3.1 dont le score est calculé** selon la spécification FIRST (jamais saisi à la main). Visible dans la fiche, le HTML, le Markdown et SARIF (`cwe`, `wstg`, `cvss`, `cvss-vector`). |
+| **Journal des requêtes** | Annexe « preuve de non-intrusivité » : nombre de requêtes, méthodes utilisées, statuts, hôtes contactés, refus du garde-fou SSRF. Le journal détaillé est dans le HTML et le Markdown, la synthèse dans l'interface (onglet Technique). Une ligne confirme l'absence de toute méthode d'écriture. |
+| **Périmètre élargi** | Le profil standard explore 8 pages (au lieu de 6) et 8 scripts : de quoi couvrir un espace client sans passer en « approfondi ». |
+| **CLI de pentest** | `vulnlens scan cible --auth-env PENTEST_AUTH --profile deep --format sarif` : le secret reste hors de l'historique du shell, la sortie s'intègre au pipeline. |
+| **Refus explicites** | En-têtes autorisés en liste blanche (`Authorization`, `Cookie`, `X-Api-Key`, `X-Auth-Token`, `X-Access-Token`, `X-Csrf-Token`), rejet des retours à la ligne (anti-injection d'en-têtes), longueur bornée. |
+
+## Ce que fait la v6.3 — contrôle d'accès et « ce que ça donne accès »
+
+| Capacité | Détail |
+|---|---|
+| **Détection d'IDOR / BOLA** | Les identifiants d'objets sont repérés dans les URL explorées **et dans les liens publiés** (sans les ouvrir) : `/users/42`, `/factures/1024`, `?user_id=7`, UUID compris. Le constat explique la faille, cite OWASP (IDOR, API1:2023) et reste marqué **« à confirmer »** : la confirmation exige deux comptes de test, jamais un rejeu d'identifiant par l'outil. |
+| **Champs cachés manipulables** | Un `<input type="hidden" name="user_id">` dans un formulaire est signalé : mass assignment, agissement sur les données d'autrui. |
+| **Paramètres de privilège** | `admin`, `role`, `is_admin`, `impersonate`, `debug`, `internal`… dans l'URL : un changement de valeur ne doit jamais élever les droits. |
+| **Paramètres de chemin et redirections** | `file`, `path`, `page`, `template`, `url`, `redirect`, `next`… : traversée de répertoire et redirection ouverte si aucune liste blanche ne les encadre. |
+| **Paramètres reflétés** | Une valeur d'URL recopiée telle quelle dans le HTML (XSS réfléchi) est détectée **sans envoyer de charge** : on observe seulement la réflexion. |
+| **Surface d'administration** | Les chemins `/admin`, `/internal`, `/backoffice`, `/staff`, `/console` cités par les scripts publics sont listés : vérifiez qu'ils ne sont pas protégés que par l'interface. |
+| **« Ce que ça donne accès »** | Chaque constat porte désormais la liste des **actifs réellement atteignables** : comptes utilisateurs, sessions, console d'admin, données personnelles, paiements, base de données, code source, cloud, serveurs, secrets, intégrations SaaS, messagerie, navigateur des visiteurs, réseau interne. Affiché dans l'interface, le HTML, le Markdown et SARIF (`access-grants`). |
+| **Synthèse « ce que l'attaquant peut atteindre »** | Le rapport agrège ces actifs, pondérés par la sévérité : la synthèse exécutive répond en une ligne à « si je ne corrige pas, qu'est-ce qui tombe ? ». |
+| **Non destructif** | Aucun identifiant n'est incrémenté, aucun rôle forgé, aucun formulaire soumis, aucune suppression : le contrôle d'accès est **entièrement passif**, comme le reste du scanner. |
+
+## Ce que fait la v6.2 — détection élargie
+
+| Capacité | Détail |
+|---|---|
+| **Bibliothèques front-end vulnérables** | Nouveau contrôle : jQuery, jQuery UI, Bootstrap 3/4, AngularJS, Handlebars, Lodash, Underscore, Moment.js, DOMPurify, CryptoJS, Axios et Vue 2. La version détectée est comparée à la **version corrigée** ; le constat cite les CVE, la version à installer et regroupe la preuve dans l'empreinte technique. Les scripts téléchargés sont réutilisés : aucune requête en double. |
+| **Analyse des JWT** | Un jeton public est décodé : `alg: none` (non signé) devient un constat **critique** de contournement d'authentification, et des revendications administratives en clair (`role: admin`, `is_admin: true`) un constat **élevé**. Le jeton reste masqué dans la preuve. |
+| **33 signatures de secrets** | + Anthropic, GitHub à granularité fine, GitLab, Hugging Face, npm, PyPI, DigitalOcean, Twilio, Shopify, Airtable, OAuth Google, webhooks Slack et Discord, secret de webhook Stripe, URL de base de données avec identifiants. La clé Anthropic n'est plus confondue avec une clé OpenAI. |
+| **50 fichiers exposés** | + état Terraform, clé privée SSH, `.git-credentials`, compte de service Google Cloud, heap dump Spring Actuator, profiler Symfony, `config/database.yml`, `.htpasswd`, schémas OpenAPI 3 et Swagger 2, console GraphiQL. |
+| **En-têtes de débogage** | Détection d'un profiler de framework actif en production (`X-Debug-Token`, `X-Symfony-Cache`) : fuite des requêtes SQL, variables d'environnement et sessions. |
+| **Restitution** | Les nouveaux constats ont leur propre rapport de situation (chemin d'accès, révélation, danger /10), leur vague de remédiation, et « bibliothèques à jour » apparaît dans les points forts quand le contrôle ne trouve rien. |
+
+## Ce que fait la v6.1 — durcissement de l'instance
+
+| Correctif | Détail |
+|---|---|
+| **SSRF par redirection** | Chaque saut de redirection est revalidé : un `302` vers `169.254.169.254` ou un service interne est refusé, plus aucun contenu interne ne remonte dans le rapport. |
+| **SSRF dans la vérification de domaine** | `/api/verify/{hôte}/check` passe par le client gardé (fini le `allow_private=True` codé en dur). |
+| **Limitation de débit fiable** | `X-Forwarded-For` n'est plus cru sur parole (`VULNLENS_TRUST_PROXY`), et `/api/verify/*/check` / `/api/watch/*/run` sont limités. |
+| **Anti-CSRF** | Les `POST` sans corps sont refusés si l'origine ne correspond pas à l'instance. |
+| **En-têtes de sécurité** | CSP stricte (`default-src 'self'`, `frame-ancestors 'none'`), `nosniff`, `Referrer-Policy`, COOP/CORP, HSTS, Permissions-Policy sur toutes les réponses. |
+| **Exports neutralisés** | Rapport HTML servi en pièce jointe avec `CSP: sandbox` ; nom de fichier filtré. |
+| **Moins de fuites** | Comparaison de jeton à temps constant, erreurs internes masquées au client, webhook sortant validé. |
+
+Détail complet, preuves et risques résiduels : **[SECURITY.md](SECURITY.md)**.
 
 ## Ce que fait la v6
 
@@ -43,7 +93,7 @@ visiteur peut observer.
 
 | Capacité | Détail |
 |---|---|
-| **Chasse aux secrets** | Les scripts JavaScript publics sont téléchargés et passés au crible de 19 signatures : clés AWS/Azure/Stripe/SendGrid/GitHub/Slack/OpenAI, clés privées, JWT, identifiants en dur, `user:pass@` dans une URL. **Valeurs masquées** dans le rapport, source maps exposées signalées. |
+| **Chasse aux secrets** | Les scripts JavaScript publics sont téléchargés et passés au crible de 33 signatures : clés AWS/Azure/Stripe/SendGrid/GitHub/GitLab/npm/Shopify, clés privées, JWT, identifiants en dur, `user:pass@` dans une URL. **Valeurs masquées** dans le rapport, source maps exposées signalées. |
 | **Plan d'action** | Chaque constat est classé en trois vagues — *aujourd'hui*, *ce sprint*, *projet* — avec le gain de score potentiel chiffré (`+47 pts`), dans l'UI, les exports et `/api/scans/{id}/plan`. |
 | **Sécurité e-mail avancée** | DMARC (`p=none`, absence de `sp=`), SPF au-delà de 10 résolutions DNS, DKIM par balayage de sélecteurs, MTA-STS et TLS-RPT. |
 | **Surface tierce** | Cartographie des domaines chargés (CDN, analytique, paiement, vidéo, support…), avec leur rôle, et alerte sur les formulaires qui postent vers l'extérieur. |
@@ -102,8 +152,8 @@ Codes de sortie : `0` (ok), `1` (sous le seuil `--fail-under`), `2` (erreur d'an
 
 | Profil | Pages | Scripts | Contrôles |
 |---|---|---|---|
-| `quick` | 1 | 3 | Transport, en-têtes, cookies, exposition, contenu, secrets, DNS, TLS |
-| `standard` (défaut) | 6 | 6 | + e-mail avancé, surface tierce, agrégation multi-pages |
+| `quick` | 1 | 3 | Transport, en-têtes, cookies, exposition, contenu, secrets, bibliothèques, DNS, TLS |
+| `standard` (défaut) | 6 | 6 | + e-mail avancé, surface tierce, bibliothèques, agrégation multi-pages |
 | `deep` | 12 | 10 | + AXFR, sous-domaines, **takeover**, redirections ouvertes, TLS détaillé |
 
 Toujours **passif** : les requêtes sont des `GET`/`HEAD` sans charge utile, sans tentative de
@@ -173,7 +223,10 @@ empreinte technique, **pages analysées**, contrôles exécutés avec leur duré
 | `POST` | `/api/verify/{hôte}/check` | Vérifie DNS puis fichier, persiste le résultat |
 
 Si `VULNLENS_TOKEN` est défini, toutes les routes `/api/*` (sauf `/api/health`) exigent
-`Authorization: Bearer <jeton>` ou `X-API-Key: <jeton>`.
+`Authorization: Bearer <jeton>` ou `X-API-Key: <jeton>`. Sans jeton, l'instance est
+ouverte : un avertissement est écrit au démarrage. Toutes les réponses portent une CSP
+stricte et les en-têtes de durcissement (`nosniff`, `frame-ancestors 'none'`, HSTS…).
+Les méthodes d'écriture sont protégées contre le CSRF par contrôle d'origine.
 
 ---
 
@@ -191,6 +244,8 @@ Si `VULNLENS_TOKEN` est défini, toutes les routes `/api/*` (sauf `/api/health`)
 | `VULNLENS_ALERT_ON_CRITICAL` | `1` | Alerte à l'apparition d'un constat critique |
 | `VULNLENS_CONTACT` | `security@example.org` | Contact dans le User-Agent |
 | `VULNLENS_DB` | `data/vulnlens.db` | Base SQLite |
+| `VULNLENS_TRUST_PROXY` | `0` | Fait confiance à `X-Forwarded-For` / `X-Forwarded-Host` (uniquement derrière un reverse proxy maîtrisé) |
+| `VULNLENS_ALLOWED_ORIGINS` | vide | Origines supplémentaires autorisées à appeler l'API (liste séparée par des virgules) |
 
 Charge utile d'alerte : `scan_id`, `host`, `score`, `previous_score`, `delta`, `reason`,
 `counts`, `priorities` (3 premiers constats avec titre, sévérité, remédiation), `report_url`.
@@ -211,6 +266,9 @@ app/
 ├─ remediation.py     plan d'action (effort, priorité, gain de score)
 ├─ narrative.py       synthèse exécutive, niveau de risque, radar, confiance
 ├─ attack.py          rapport de situation : chemin d'accès, révélation, danger 1-10
+├─ impact.py          ce que chaque faille donne accès (comptes, base, paiements…)
+├─ standards.py       CWE, WSTG et calculateur CVSS 3.1
+├─ credentials.py     en-tête d'authentification : validation, masquage
 ├─ watch.py           surveillance planifiée (échéances, réanalyse, alertes)
 ├─ alerts.py          webhook best-effort
 ├─ db.py              SQLite, migrations, stats, analyse précédente
@@ -221,13 +279,15 @@ app/
 │  ├─ aggregate.py    fusion des constats multi-pages
 │  ├─ fetcher.py      HTTP poli (timeouts, UA, taille bornée), TLS
 │  ├─ checks_http.py  en-têtes, cookies, méthodes, HSTS
-│  ├─ checks_secrets.py   19 signatures de secrets + source maps
+│  ├─ checks_secrets.py   33 signatures de secrets, JWT et source maps
+│  ├─ checks_libs.py      bibliothèques front-end vs versions corrigées (CVE)
+│  ├─ checks_access.py    IDOR/BOLA, champs cachés, paramètres de privilège (passif)
 │  ├─ checks_email.py     DMARC, SPF, DKIM, MTA-STS, TLS-RPT
 │  ├─ checks_thirdparty.py cartographie des dépendances tierces
 │  ├─ recon_ct.py          sous-domaines via Certificate Transparency
 │  ├─ tech.py              WAF, CDN, CMS, frameworks, analytique
 │  ├─ checks_tls.py   certificat, protocoles, chaîne
-│  ├─ checks_exposure.py  38 chemins sensibles (.git, .env, backups…)
+│  ├─ checks_exposure.py  50 chemins sensibles (.git, .env, state Terraform, heap dump…)
 │  ├─ checks_content.py   formulaires, CSP, SRI, iframes, commentaires
 │  ├─ checks_dns.py   SPF, DMARC, DKIM, DNSSEC, CAA
 │  ├─ checks_deep.py  AXFR, sous-domaines, takeover, redirections
@@ -243,7 +303,7 @@ liste des pages concernées, pour éviter les rapports de 300 lignes répétitiv
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest        # 217 tests
+.venv/bin/python -m pytest        # 325 tests (dont 30 de durcissement)
 .venv/bin/ruff check .
 
 # interface : rendu simulé (jsdom), aucune erreur JavaScript tolérée
@@ -251,12 +311,15 @@ npm install                       # une seule fois (dev)
 npm run ui:check                  # parcours de scan + tableau de bord / tendance
 ```
 
-Couverture : normalisation et refus de cibles, scoring, en-têtes, contenu, DNS/deep, **crawl**,
+Couverture : normalisation et refus de cibles, scoring, en-têtes, contenu, DNS/deep, **bibliothèques front-end**,
+**analyse des JWT**, **contrôle d'accès (IDOR)**, **actifs atteignables**, **CWE/WSTG/CVSS**,
+**en-tête d'authentification** (jamais envoyé aux tiers, jamais reporté), **journal des requêtes**, **crawl**,
 **agrégation**, **diff**, **alertes**, **vérification**, **takeover**, **secrets**, **e-mail**,
 **surface tierce**, **plan de remédiation**, **synthèse exécutive**, **surveillance**, **Certificate
-Transparency**, **empreinte technique**, persistance, API (historique, exports, jeton, diff, plan,
-watch, trend, verify), CLI (`scan`, `verify`, `watch`), et un **test de fumée de l'interface** sous
-jsdom. Fixture serveur volontairement vulnérable : 3 pages, clé AWS factice, source map exposée.
+Transparency**, **empreinte technique**, **secrets et expositions élargis**, persistance, API (historique, exports, jeton, diff, plan,
+watch, trend, verify), **sécurité de l'instance** (SSRF par redirection, SSRF de la
+vérification, AXFR interne, contournement de débit, CSRF, en-têtes, fuite d'erreurs),
+CLI (`scan`, `verify`, `watch`), et un **test de fumée de l'interface** sous jsdom. Fixture serveur volontairement vulnérable : 3 pages, clé AWS factice, source map exposée.
 
 ---
 
@@ -268,6 +331,11 @@ jsdom. Fixture serveur volontairement vulnérable : 3 pages, clé AWS factice, s
 - [x] Rapport de situation avec cotation de dangerosité 1-10
 - [x] Chasse aux secrets dans les bundles publics
 - [x] Cartographie des dépendances tierces
+- [x] CWE, WSTG et CVSS 3.1 sur chaque constat
+- [x] Journal des requêtes (preuve de non-intrusivité)
+- [x] Scan de la zone authentifiée sans jamais persister le secret
+- [ ] Import d'une portée (`scope.txt`) et d'une liste d'URLs
+- [ ] Triage des constats (confirmé / faux positif) avant export client
 - [ ] Rapport hebdomadaire par e-mail (digest de la surveillance)
 - [ ] Règles personnalisées (`*.yaml`) pour les contrôles maison
 - [ ] Comparaison multi-sites (portefeuille)

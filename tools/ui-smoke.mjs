@@ -1,8 +1,12 @@
 import { JSDOM, VirtualConsole } from "jsdom";
 import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const html = fs.readFileSync("/home/user/3F/app/static/index.html", "utf8");
-const js = fs.readFileSync("/home/user/3F/app/static/app.js", "utf8");
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+const html = fs.readFileSync(path.join(ROOT, "app/static/index.html"), "utf8");
+const js = fs.readFileSync(path.join(ROOT, "app/static/app.js"), "utf8");
 
 const errors = [];
 const virtualConsole = new VirtualConsole();
@@ -14,7 +18,11 @@ const findings = [
     remediation: "Bloquez .git/", reference: "https://owasp.org", confidence: "certain",
     danger: 10, danger_label: "Critique — exploitable immédiatement, impact majeur",
     access: ["Ouvrir https://cible.test/.git/HEAD sans authentification.", "Le serveur renvoie la branche courante."],
-    reveals: "Le code source complet et les secrets de l'historique.", skill: "faible" },
+    reveals: "Le code source complet et les secrets de l'historique.", skill: "faible",
+    cwe: "CWE-527", cwe_name: "Exposition d'un dépôt de gestion de versions",
+    wstg: "WSTG-CONF-04", cvss: 7.5, cvss_vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+    grants: ["Code source et historique Git", "Secrets de configuration", "Infrastructure cloud"],
+    grants_text: "Code source et historique Git · Secrets de configuration · Infrastructure cloud" },
   { id: "content.comments-leak", title: "Commentaire sensible", severity: "low", severity_label: "Faible",
     category: "Fuite d'information", description: "Mot de passe en commentaire.", evidence: "<!-- pwd -->",
     remediation: "Nettoyez le HTML.", reference: "", confidence: "a-confirmer",
@@ -36,6 +44,14 @@ const report = {
   checks: [{ key: "headers", label: "En-têtes", status: "ok", findings: [] },
            { key: "secrets", label: "Secrets & scripts", status: "ok", findings: [] }],
   findings,
+  requests_summary: { total: 12, kept: 12, dropped: 0, by_method: { GET: 10, OPTIONS: 1, TRACE: 1 },
+                      by_status: { "200": 9, "404": 3 }, by_host: { "cible.test": 12 },
+                      blocked: 0, write_methods: 0, read_only: true },
+  requests: [
+    { method: "GET", url: "https://cible.test/.git/HEAD", status: 200, ms: 12 },
+    { method: "GET", url: "https://cible.test/robots.txt", status: 404, ms: 8 },
+  ],
+  auth_used: true, auth_kind: "bearer",
   executive: {
     risk_level: "élevé", headline: "1 faille critique donne un accès immédiat.",
     paragraph: "Analyse de 2 pages et de 11 familles de contrôles.",
@@ -45,6 +61,7 @@ const report = {
     danger_max: 10,
     radar: [{ label: "Exposition de fichiers", value: 100 }, { label: "Fuite d'information", value: 5 },
             { label: "Configuration HTTP", value: 0 }],
+    reachable: ["Code source et historique Git", "Secrets de configuration", "Infrastructure cloud"],
   },
 };
 
@@ -128,6 +145,14 @@ setTimeout(() => {
   check("pages listées", document.querySelectorAll("#pages-list li").length === 2);
   check("tiers listés", document.querySelectorAll("#third-list li").length === 2);
 
+  // référentiels + journal des requêtes
+  check("CWE/WSTG/CVSS affichés", [...document.querySelectorAll(".std-chip")].some((c) => !c.hidden && c.textContent.includes("CWE-527")));
+  check("journal des requêtes visible", document.querySelector("#requests-panel").hidden === false);
+  check("résumé du journal", document.querySelectorAll("#requests-summary li").length >= 4);
+  check("lecture seule confirmée", document.querySelector("#requests-summary .ok") !== null);
+  check("journal détaillé", document.querySelectorAll("#request-log .req-line").length === 2);
+  check("champ d'authentification présent", document.querySelector("#auth") !== null);
+
   // rapport de situation
   check("panneau situation visible", document.querySelector("#situation-panel").hidden === false);
   check("5 cartes max", document.querySelectorAll("#situation-list .situation-card").length === 2);
@@ -135,6 +160,15 @@ setTimeout(() => {
   check("étapes en carte", document.querySelectorAll("#situation-list ol.access li").length >= 2);
   check("chip danger dans le constat", [...document.querySelectorAll(".danger-chip")].some((c) => !c.hidden && c.textContent.includes("10/10")));
   check("onglet situation compté", document.querySelector("#tab-count-situation").textContent === "2");
+
+  // ce que la faille donne accès
+  check("actifs atteignables en synthèse", document.querySelectorAll("#exec-reachable li").length === 3);
+  check("synthèse actifs visible", document.querySelector("#exec-reach").hidden === false);
+  check("actifs dans la fiche", document.querySelectorAll("#findings .finding .grants li").length === 3);
+  check(
+    "fiche sans actif masquée",
+    [...document.querySelectorAll("#findings .finding .grants-block")].some((b) => b.hidden)
+  );
 
   // onglets
   const constatsTab = document.querySelector('.tab[data-tab="constats"]');

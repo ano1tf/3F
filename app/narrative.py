@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import impact as impact_assets
+
 RISK_LEVELS: tuple[tuple[int, str, str], ...] = (
     (80, "faible", "La posture est saine ; il reste des finitions."),
     (60, "modéré", "Des faiblesses exploitables existent, mais le socle tient."),
@@ -17,12 +19,32 @@ RISK_LEVELS: tuple[tuple[int, str, str], ...] = (
 
 IMPACTS: tuple[tuple[str, str], ...] = (
     (
+        "access.idor",
+        "Avec un simple compte, un attaquant lit — et parfois modifie — les données de tous les "
+        "autres clients : factures, adresses, commandes, messages.",
+    ),
+    (
+        "access.parameter-control",
+        "Un paramètre d'URL suffit à changer de rôle : l'attaquant peut se donner les droits d'un "
+        "administrateur sans aucune faille technique à exploiter.",
+    ),
+    (
+        "access.",
+        "Une barrière d'autorisation manque ou se contourne : les données d'autrui deviennent "
+        "accessibles avec un compte ordinaire.",
+    ),
+    (
         "exposure.",
         "Un attaquant récupère du code, des sauvegardes ou des secrets sans aucune authentification.",
     ),
     (
         "secrets.",
         "Des accès cloud ou SaaS sont directement utilisables, au nom et aux frais de l'organisation.",
+    ),
+    (
+        "libs.",
+        "Une bibliothèque obsolète offre un point d'entrée connu (XSS, exécution de code) dans le "
+        "navigateur de vos visiteurs, sans aucune recherche à faire pour l'attaquant.",
     ),
     (
         "transport.",
@@ -86,6 +108,7 @@ def _strengths(report: dict[str, Any], present: set[str], is_https: bool) -> lis
         "transport": any(item.startswith("transport.") for item in present),
         "mixed": "content.mixed-content" in present,
         "third": bool(report.get("third_parties")),
+        "libs": any(item.startswith("libs.") for item in present),
     }
 
     rules: list[tuple[bool, str]] = [
@@ -103,6 +126,8 @@ def _strengths(report: dict[str, Any], present: set[str], is_https: bool) -> lis
         (is_https and ran("content") and not families["mixed"],
          "Contenus mixtes absents : tous les actifs sont chargés en HTTPS"),
         (ran("surface") and not families["third"], "Aucune dépendance tierce critique détectée"),
+        (ran("libs") and not families["libs"],
+         "Bibliothèques front-end à jour (aucune version à vulnérabilité connue)"),
     ]
     return [label for condition, label in rules if condition]
 
@@ -218,6 +243,7 @@ def build(report: dict[str, Any]) -> dict[str, Any]:
             "info": int(counts.get("info", 0)),
             "total": total,
         },
+        "reachable": impact_assets.reachable(findings),
     }
 
 

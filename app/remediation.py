@@ -33,10 +33,17 @@ QUICK_IDS = {
     "exposure.directory-listing",
     "robots.disclosure",
     "headers.methods-allowed",
+    "headers.debug-token",
+    "exposure.symfony-profiler",
+    "access.parameter-control",
+    "access.reflected-parameter",
+    "access.sensitive-endpoint",
 }
 
 PREFIX_EFFORT: tuple[tuple[str, str], ...] = (
     ("secrets.", "project"),
+    ("libs.", "sprint"),
+    ("access.", "sprint"),
     ("recon.subdomain-takeover", "quick"),
     ("recon.", "sprint"),
     ("tls.", "sprint"),

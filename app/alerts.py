@@ -6,11 +6,36 @@ Silencieux par défaut : rien n'est envoyé sans `VULNLENS_WEBHOOK_URL`.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
 from . import config
+from .safety import is_blocked_host, is_public_ip
+
+
+def webhook_allowed(url: str) -> bool:
+    """Refuse un webhook qui viserait une cible interne (SSRF par mauvaise config).
+
+    Les cibles privées restent possibles pour les tests locaux en activant
+    `VULNLENS_ALLOW_PRIVATE=1`.
+    """
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return False
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return False
+    if config.ALLOW_PRIVATE_TARGETS:
+        return True
+    host = parsed.hostname.lower()
+    try:
+        literal = ipaddress.ip_address(host)
+    except ValueError:
+        return not is_blocked_host(host)
+    return is_public_ip(literal)
 
 
 def should_alert(report: dict[str, Any], previous: dict[str, Any] | None) -> tuple[bool, str]:
@@ -58,13 +83,13 @@ def payload(report: dict[str, Any], reason: str) -> dict[str, Any]:
 async def notify(report: dict[str, Any], previous: dict[str, Any] | None) -> bool:
     """Envoie une alerte si nécessaire. Ne lève jamais : best-effort."""
     triggered, reason = should_alert(report, previous)
-    if not triggered:
+    if not triggered or not webhook_allowed(config.WEBHOOK_URL):
         return False
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=False) as client:
             response = await client.post(config.WEBHOOK_URL, json=payload(report, reason))
             return 200 <= response.status_code < 300
-    except (httpx.HTTPError, OSError):
+    except (httpx.HTTPError, OSError, ValueError):
         return False
 
 

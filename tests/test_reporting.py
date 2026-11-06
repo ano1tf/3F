@@ -282,3 +282,83 @@ def test_markdown_includes_situation():
     assert "## Rapport de situation" in markdown
     assert "danger 10/10" in markdown
     assert "**Comment y arriver :**" in markdown
+
+
+def test_reports_state_what_each_finding_gives_access_to():
+    """Chaque rapport nomme les actifs exposés (comptes, code, base…)."""
+    from app import attack, impact
+
+    report = sample_report()
+    attack.annotate(report["findings"], report["final_url"])
+    impact.annotate(report["findings"])
+    reachable = impact.reachable(report["findings"])
+    report["executive"] = {
+        "risk_level": "élevé",
+        "headline": "Un dépôt Git est public.",
+        "paragraph": "Le code source est lisible par tous.",
+        "key_risks": [],
+        "strengths": [],
+        "radar": [],
+        "danger_max": 9,
+        "reachable": reachable,
+    }
+
+    html_out = reporting.to_html(report)
+    assert "Donne accès à" in html_out
+    assert "Code source et historique Git" in html_out
+    assert "peut atteindre" in html_out
+
+    md = reporting.to_markdown(report)
+    assert "**Donne accès à :** Code source et historique Git" in md
+    assert "### Ce que l'attaquant peut atteindre" in md
+
+    sarif = reporting.to_sarif(report)
+    props = sarif["runs"][0]["results"][0]["properties"]
+    assert "Code source et historique Git" in props["access-grants"]
+    assert sarif["runs"][0]["properties"]["reachable"] == reachable
+
+
+def test_reports_include_standards_and_request_journal():
+    """Annexe « preuve de non-intrusivité » + CWE/WSTG/CVSS dans chaque constat."""
+    from app import standards
+
+    report = sample_report()
+    for finding in report["findings"]:
+        finding.update(standards.describe(finding["id"]))
+    report["requests_summary"] = {
+        "total": 8,
+        "kept": 8,
+        "dropped": 0,
+        "by_method": {"GET": 8},
+        "by_status": {"200": 7, "404": 1},
+        "by_host": {"cible.test": 8},
+        "blocked": 0,
+        "write_methods": 0,
+        "read_only": True,
+    }
+    report["requests"] = [
+        {"method": "GET", "url": "https://cible.test/.git/HEAD", "status": 200, "ms": 12},
+        {"method": "GET", "url": "https://cible.test/robots.txt", "status": 404, "ms": 9},
+    ]
+    report["auth_used"] = True
+    report["auth_kind"] = "cookie"
+
+    html_out = reporting.to_html(report)
+    assert "Annexe — requêtes effectuées" in html_out
+    assert 'class="std"' in html_out
+    assert "CWE-527" in html_out
+    assert "Aucune méthode d'écriture" in html_out
+    assert "Scan authentifié (cookie)" in html_out
+
+    md = reporting.to_markdown(report)
+    assert "Annexe — requêtes effectuées" in md
+    assert "**8 requête(s)**" in md
+    assert "`CWE-527 · WSTG-CONF-04 · CVSS 7.5`" in md
+
+    sarif = reporting.to_sarif(report)
+    props = sarif["runs"][0]["results"][0]["properties"]
+    assert props["cwe"] == "CWE-527"
+    assert props["cvss"] == 7.5
+    run_props = sarif["runs"][0]["properties"]
+    assert run_props["authUsed"] is True
+    assert run_props["requests"]["total"] == 8

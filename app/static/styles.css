@@ -1234,3 +1234,65 @@ ol.access li { margin: 5px 0; }
 .situation-card .sit-fix { margin: 0; font-size: 12.5px; color: #b7e7cf; }
 .situation-card .sit-fix strong { color: #d6f5e5; }
 .situation-card ol { margin: 0; }
+
+
+/* Ce que la faille donne accès (comptes, base, paiements…) */
+.grants-block h3 { color: #7fd7f2; }
+.grants { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 0; padding: 0; }
+.grants li {
+  background: rgba(34, 211, 238, 0.12);
+  border: 1px solid rgba(34, 211, 238, 0.35);
+  color: #bde9f7;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.exec-reach { margin-top: 18px; }
+.exec-reach h3 { margin: 0 0 8px; font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.reach-list { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; }
+.reach-list li {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-strong, #24344b);
+  border-radius: 999px;
+  padding: 4px 11px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #d7e6f5;
+}
+@media print {
+  .grants li, .reach-list li { border-color: #999 !important; color: #222 !important; background: #fff !important; }
+}
+
+
+/* Référentiels (CWE / WSTG / CVSS) et journal des requêtes */
+.std-chip {
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: #7fd7f2;
+  background: rgba(34, 211, 238, 0.1);
+  border: 1px solid rgba(34, 211, 238, 0.28);
+  border-radius: 4px;
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+.req-summary { list-style: none; margin: 8px 0 12px; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+.req-summary .ok { color: #34d399; font-weight: 600; }
+.req-summary .warn { color: #fbbf24; font-weight: 600; }
+#requests-details summary { cursor: pointer; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.req-log { margin-top: 8px; max-height: 320px; overflow: auto; font-size: 11.5px; }
+.req-line { display: grid; grid-template-columns: 62px 1fr 52px 62px; gap: 8px; padding: 2px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+.req-method { color: #7fd7f2; font-weight: 700; }
+.req-url { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.req-status, .req-ms { text-align: right; color: var(--muted); }
+
+/* Zone authentifiée (optionnel) */
+.auth-block { margin-top: 12px; border: 1px solid var(--border, #24344b); border-radius: 10px; padding: 10px 14px; }
+.auth-block summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--muted); }
+.auth-block input { width: 100%; margin-top: 10px; padding: 9px 11px; border-radius: 8px;
+                    border: 1px solid var(--border, #24344b); background: rgba(255,255,255,0.03);
+                    color: inherit; font-family: var(--mono, ui-monospace, monospace); font-size: 12.5px; }
+.auth-block input:focus { outline: 2px solid rgba(34,211,238,0.4); outline-offset: 1px; }

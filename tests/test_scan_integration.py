@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 
@@ -35,14 +36,35 @@ def test_full_scan_detects_expected_issues(vulnerable_server):
     assert "headers.csp-wildcard" in ids
     assert "cookies.prefix-violation" in ids
     assert "exposure.directory-listing" in ids
+    # Nouveaux contrôles : état Terraform, clé SSH, profiler, bibliothèque obsolète.
+    assert "exposure.terraform-state" in ids
+    assert "exposure.ssh-private-key" in ids
+    assert "headers.debug-token" in ids
+    assert "libs.jquery" in ids
+    # Contrôle d'accès passif : le mode rapide lit les liens sans les ouvrir.
+    assert "access.idor-object-id" in ids
+    assert "access.sensitive-endpoint" in ids
 
     assert report.score < 60
     assert report.grade in {"D", "E", "F"}
     assert report.counts["critical"] >= 2
     assert report.duration_ms > 0
     assert report.scan_id
-    assert report.score_breakdown and sum(report.score_breakdown.values()) == 100 - report.score
+    # Le score est borné à 0 : la somme des pénalités peut dépasser 100.
+    penalty = sum(report.score_breakdown.values())
+    assert report.score_breakdown
+    assert report.score == max(0, min(100, 100 - penalty))
     assert 1 <= len(report.priorities) <= 3
+
+    # Chaque constat dit ce qu'il donne accès ; la synthèse liste les actifs joignables.
+    idor = next(finding for finding in report.findings if finding.id == "access.idor-object-id")
+    assert idor.grants and "Comptes utilisateurs" in idor.grants
+    assert idor.grants_text
+    assert idor.confidence == "a-confirmer"
+    for finding in report.findings:
+        assert finding.grants, finding.id
+    assert report.executive["reachable"]
+    assert "Comptes utilisateurs" in report.executive["reachable"]
 
     kinds = [event["type"] for event in events]
     assert kinds[0] in {"progress", "accepted"}
@@ -96,6 +118,10 @@ def test_standard_profile_aggregates_pages(vulnerable_server):
     assert len(report.pages) >= 2
     urls = " ".join(page["url"] for page in report.pages)
     assert "/about" in urls and "/contact" in urls
+    # Les pages ouvertes révèlent en plus le champ caché et le paramètre reflété.
+    ids = {finding.id for finding in report.findings}
+    assert "access.hidden-object-id" in ids
+    assert "access.reflected-parameter" in ids
     # Une même famille de problème devient un seul constat enrichi.
     aggregated = next(f for f in report.findings if f.id == "headers.missing.referrer-policy")
     assert "pages analysées" in aggregated.evidence.lower()
@@ -156,3 +182,89 @@ def test_findings_carry_situation_and_danger(vulnerable_server):
     assert critical["danger_label"]
     assert payload["executive"]["danger_max"] >= 9
     assert all(finding.get("danger") for finding in payload["findings"])
+
+
+def test_vulnerable_library_carries_version_and_reference(vulnerable_server):
+    async def emit(_payload: dict) -> None:
+        return None
+
+    report = asyncio.run(run_scan(vulnerable_server.url, emit, profile="standard"))
+    finding = next(f for f in report.findings if f.id == "libs.jquery")
+
+    assert "3.4.1" in finding.title
+    assert "3.5.0" in finding.evidence
+    assert finding.reference.startswith("https://")
+    assert finding.danger >= 7
+    assert finding.access and finding.reveals
+    # La bibliothèque est aussi visible dans l'empreinte technique.
+    assert "jQuery" in report.fingerprint.get("bibliotheques", "")
+
+
+def test_new_checks_are_reported_in_check_list(vulnerable_server):
+    async def emit(_payload: dict) -> None:
+        return None
+
+    report = asyncio.run(run_scan(vulnerable_server.url, emit, profile="standard"))
+    keys = {check.key: check for check in report.checks}
+
+    assert "libs" in keys
+    assert keys["libs"].status == "ok"
+    assert keys["libs"].findings
+    assert "exposure" in keys and keys["exposure"].status == "ok"
+
+
+def _run(url, profile="quick", auth=None):
+    async def emit(_payload: dict) -> None:
+        return None
+
+    return asyncio.run(run_scan(url, emit, profile=profile, auth=auth))
+
+
+def test_report_carries_standards_and_request_journal(vulnerable_server):
+    """Chaque constat cite CWE/WSTG/CVSS et le rapport garde la trace du trafic."""
+    report = _run(vulnerable_server.url)
+
+    summary = report.requests_summary
+    assert summary["total"] > 0
+    assert summary["read_only"] is True
+    assert summary["write_methods"] == 0
+    # Le journal ne recopie jamais la chaîne de requête (elle peut porter un jeton).
+    assert all("?" not in entry["url"] for entry in report.requests)
+    assert all(
+        entry["method"] in {"GET", "HEAD", "OPTIONS", "TRACE"} for entry in report.requests
+    )
+
+    git = next(finding for finding in report.findings if finding.id == "exposure.git")
+    assert git.cwe == "CWE-527"
+    assert git.wstg.startswith("WSTG-")
+    assert git.cvss == 7.5
+    assert git.cvss_vector.startswith("CVSS:3.1/")
+
+    # Aucun constat critique ne peut afficher un CVSS faible.
+    for finding in report.findings:
+        if finding.severity.value == "critical":
+            assert finding.cvss >= 7.0, finding.id
+
+
+def test_authenticated_scan_reaches_the_private_area(vulnerable_server):
+    def status_of(report, path: str) -> int | None:
+        return next(
+            (page["status"] for page in report.pages if page["url"].endswith(path)),
+            None,
+        )
+
+    anonymous = _run(vulnerable_server.url, profile="standard")
+    assert anonymous.auth_used is False
+    assert status_of(anonymous, "/compte") == 401
+
+    authenticated = _run(
+        vulnerable_server.url,
+        profile="standard",
+        auth=("Authorization", "Bearer test-token"),
+    )
+    assert status_of(authenticated, "/compte") == 200
+    assert authenticated.auth_used is True
+    assert authenticated.auth_kind == "bearer"
+    # Le jeton lui-même ne doit jamais apparaître dans le rapport.
+    dump = json.dumps(authenticated.to_dict(), ensure_ascii=False)
+    assert "test-token" not in dump

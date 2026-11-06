@@ -13,11 +13,12 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from . import config, db, remediation, reporting, verify
+from . import config, credentials, db, remediation, reporting, verify
 from .models import Severity
 from .safety import ScanError, normalize_target
 from .scanner.engine import run_scan
@@ -27,7 +28,12 @@ EXIT_THRESHOLD = 1
 EXIT_ERROR = 2
 
 
-async def _scan(target: str, profile: str, verbose: bool):
+async def _scan(
+    target: str,
+    profile: str,
+    verbose: bool,
+    auth: tuple[str, str] | None = None,
+):
     async def emit(event: dict) -> None:
         if not verbose:
             return
@@ -36,7 +42,7 @@ async def _scan(target: str, profile: str, verbose: bool):
         elif event.get("type") == "error":
             print(f"  ! {event.get('message')}", file=sys.stderr)
 
-    return await run_scan(target, emit, profile=profile)
+    return await run_scan(target, emit, profile=profile, auth=auth)
 
 
 def _print_summary(report) -> None:
@@ -195,6 +201,20 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="N",
         help="Code de sortie 1 si le score est inférieur à N (usage CI)",
     )
+    scan.add_argument(
+        "--auth",
+        metavar="« NOM: VALEUR »",
+        help=(
+            "En-tête d'authentification pour couvrir la zone connectée, ex. "
+            "« Authorization: Bearer … » ou « Cookie: session=… ». "
+            "Jamais écrit dans le rapport ni dans l'historique."
+        ),
+    )
+    scan.add_argument(
+        "--auth-env",
+        metavar="VARIABLE",
+        help="Lit l'en-tête d'authentification depuis une variable d'environnement (recommandé).",
+    )
     scan.add_argument("--no-save", action="store_true", help="Ne pas enregistrer dans l'historique")
     scan.add_argument("--verbose", "-v", action="store_true", help="Afficher la progression")
     scan.add_argument("--quiet", "-q", action="store_true", help="N'afficher que le rapport")
@@ -271,7 +291,12 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_ERROR
 
     try:
-        report = asyncio.run(_scan(args.url, args.profile, args.verbose))
+        raw_auth = args.auth or (os.environ.get(args.auth_env) if args.auth_env else None)
+        parsed_auth = credentials.parse(raw_auth) if raw_auth else None
+        report = asyncio.run(_scan(args.url, args.profile, args.verbose, parsed_auth))
+    except credentials.AuthHeaderError as exc:
+        print(f"En-tête d'authentification refusé : {exc}", file=sys.stderr)
+        return EXIT_ERROR
     except ScanError as exc:
         print(f"Analyse impossible : {exc.message}", file=sys.stderr)
         return EXIT_ERROR

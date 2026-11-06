@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import impact
+
 SEVERITY_BASE = {"critical": 9, "high": 7, "medium": 5, "low": 3, "info": 1}
 
 DANGER_LABELS: tuple[tuple[int, str], ...] = (
@@ -38,6 +40,169 @@ def _steps(*items: str) -> list[str]:
 # Chaque famille décrit : le chemin d'accès (étapes), ce que la faille révèle, l'écart de
 # dangerosité par rapport à la sévérité de base et le niveau de compétence nécessaire.
 FAMILIES: tuple[tuple[str, dict[str, Any]], ...] = (
+    (
+        "libs.",
+        {
+            "steps": _steps(
+                "Lire le nom des fichiers JavaScript servis par le site : la version y figure "
+                "souvent en clair (`jquery-1.12.4.min.js`).",
+                "Comparer cette version aux avis publics : la faille est déjà documentée, avec "
+                "son numéro CVE et souvent une preuve de concept publiée.",
+                "Injecter un contenu piégé dans une zone que cette bibliothèque traite (commentaire, "
+                "nom de profil, paramètre d'URL) pour exécuter du script chez les visiteurs.",
+            ),
+            "reveals": "Une bibliothèque obsolète, donc une vulnérabilité publique applicable "
+            "sans recherche : XSS stocké, pollution de prototype ou exécution de code selon la "
+            "bibliothèque. Le navigateur des visiteurs authentifiés devient le point d'entrée.",
+            "modifier": 1,
+            "skill": "faible",
+        },
+    ),
+    (
+        "secrets.jwt-alg-none",
+        {
+            "steps": _steps(
+                "Récupérer le jeton trouvé dans un fichier public (la preuve le masque).",
+                "Décoder son en-tête : il annonce `alg: none`, donc aucune signature.",
+                "Réécrire les revendications (`sub`, `role`, `exp`) et présenter le jeton au "
+                "serveur : s'il accepte cet algorithme, la session est ouverte sans mot de passe.",
+            ),
+            "reveals": "Un contournement complet de l'authentification : n'importe quel rôle "
+            "peut être endossé, y compris administrateur.",
+            "modifier": 1,
+            "skill": "aucune",
+        },
+    ),
+    (
+        "secrets.jwt-privileged",
+        {
+            "steps": _steps(
+                "Extraire le jeton depuis les fichiers publics du site.",
+                "Lire ses revendications : le rôle annoncé est administratif.",
+                "Le rejouer tant qu'il est valide, ou s'en inspirer pour forger un jeton si la "
+                "signature est mal vérifiée.",
+            ),
+            "reveals": "Un accès privilégié direct, ou le format exact des revendications à "
+            "reproduire pour élever ses droits.",
+            "modifier": 1,
+            "skill": "faible",
+        },
+    ),
+    (
+        "headers.debug-token",
+        {
+            "steps": _steps(
+                "Lire l'en-tête de réponse `X-Debug-Token` : il identifie une requête dans le "
+                "profiler du framework.",
+                "Ouvrir `/_profiler/<jeton>` : requêtes SQL, variables d'environnement, sessions "
+                "et e-mails envoyés sont affichés sans authentification.",
+                "Réutiliser les secrets trouvés (identifiants de base, jetons) pour aller plus loin.",
+            ),
+            "reveals": "L'intérieur de l'application : requêtes SQL, configuration, sessions "
+            "d'utilisateurs et parfois secrets d'API.",
+            "modifier": 1,
+            "skill": "aucune",
+        },
+    ),
+    (
+        "exposure.terraform-state",
+        {
+            "steps": _steps(
+                "Télécharger `{target}/terraform.tfstate` : le fichier est servi statiquement.",
+                "Y lire l'inventaire d'infrastructure et les valeurs sensibles (mots de passe, "
+                "clés d'accès) que Terraform y stocke en clair.",
+                "Utiliser ces identifiants contre les services cloud ou les bases concernés.",
+            ),
+            "reveals": "La carte complète de l'infrastructure et ses secrets : c'est la prise "
+            "de contrôle du cloud, pas seulement du site.",
+            "modifier": 1,
+            "skill": "aucune",
+        },
+    ),
+    (
+        "exposure.actuator-heapdump",
+        {
+            "steps": _steps(
+                "Demander `{target}/actuator/heapdump` : un dump mémoire complet est renvoyé.",
+                "L'analyser avec un outil Java pour extraire chaînes, mots de passe, clés et "
+                "jetons de session encore en mémoire.",
+                "Rejouer les sessions ou les identifiants extraits.",
+            ),
+            "reveals": "La mémoire vive du serveur applicatif : secrets de configuration, "
+            "sessions actives et données personnelles.",
+            "modifier": 1,
+            "skill": "faible",
+        },
+    ),
+    (
+        "exposure.symfony-profiler",
+        {
+            "steps": _steps(
+                "Ouvrir `{target}/_profiler` : l'interface de débogage s'affiche sans authentification.",
+                "Parcourir les dernières requêtes : SQL, variables d'environnement, sessions.",
+                "Réutiliser les secrets et les sessions trouvés.",
+            ),
+            "reveals": "Une console de débogage complète en production : structure interne, "
+            "requêtes SQL et données de session.",
+            "modifier": 1,
+            "skill": "aucune",
+        },
+    ),
+    (
+        "exposure.ssh-private-key",
+        {
+            "steps": _steps(
+                "Télécharger la clé privée exposée (`{target}/.ssh/id_rsa`).",
+                "La présenter aux serveurs qui font confiance à la clé publique correspondante.",
+                "Se connecter en SSH avec les droits du compte associé.",
+            ),
+            "reveals": "Un accès serveur direct, hors application, avec les droits du compte "
+            "propriétaire de la clé.",
+            "modifier": 1,
+            "skill": "faible",
+        },
+    ),
+    (
+        "exposure.gcp-service-account",
+        {
+            "steps": _steps(
+                "Télécharger le fichier d'identifiants de compte de service.",
+                "S'authentifier auprès des API Google Cloud avec ce fichier.",
+                "Lister et lire les ressources accessibles (stockage, base, facturation).",
+            ),
+            "reveals": "Les droits du compte de service sur l'infrastructure cloud : lecture et "
+            "souvent écriture des données.",
+            "modifier": 1,
+            "skill": "faible",
+        },
+    ),
+    (
+        "exposure.database-config",
+        {
+            "steps": _steps(
+                "Télécharger le fichier de configuration (`{target}/config/database.yml`).",
+                "Y lire l'hôte, l'utilisateur et le mot de passe de la base.",
+                "Se connecter directement à la base si elle est joignable depuis l'extérieur.",
+            ),
+            "reveals": "Un accès direct aux données, sans passer par l'application ni ses "
+            "contrôles d'accès.",
+            "modifier": 1,
+            "skill": "faible",
+        },
+    ),
+    (
+        "exposure.htpasswd",
+        {
+            "steps": _steps(
+                "Télécharger le fichier `.htpasswd` servi par erreur.",
+                "Extraire les empreintes de mots de passe des comptes listés.",
+                "Les casser hors ligne (ces empreintes sont souvent faibles) et se connecter.",
+            ),
+            "reveals": "Les identifiants des comptes protégés par l'authentification HTTP.",
+            "modifier": 0,
+            "skill": "faible",
+        },
+    ),
     (
         "exposure.git",
         {
@@ -332,6 +497,97 @@ FAMILIES: tuple[tuple[str, dict[str, Any]], ...] = (
         },
     ),
     (
+        "access.idor",
+        {
+            "steps": _steps(
+                "Ouvrir un compte ordinaire, puis relever l'identifiant d'un objet qui vous appartient.",
+                "Renvoyer la même requête avec l'identifiant d'un autre client.",
+                "La réponse contient ses données : l'autorisation n'est pas vérifiée côté serveur.",
+            ),
+            "reveals": "Les données de chaque client, une par une, avec un compte banal.",
+            "modifier": 1,
+            "skill": "faible",
+        },
+    ),
+    (
+        "access.hidden-object-id",
+        {
+            "steps": _steps(
+                "Afficher le code source du formulaire.",
+                "Modifier le champ caché qui porte l'identifiant de l'objet.",
+                "Soumettre : le serveur applique l'action au nouvel identifiant s'il ne vérifie rien.",
+            ),
+            "reveals": "La possibilité d'agir sur le compte ou la commande d'un autre utilisateur.",
+            "modifier": 1,
+            "skill": "faible",
+        },
+    ),
+    (
+        "access.parameter-control",
+        {
+            "steps": _steps(
+                "Repérer le paramètre de rôle ou de mode dans l'URL.",
+                "Changer sa valeur (rôle supérieur, mode debug).",
+                "Observer si l'interface et l'API accordent des droits supplémentaires.",
+            ),
+            "reveals": "Une élévation de privilèges obtenue sans aucune exploitation technique.",
+            "modifier": 1,
+            "skill": "faible",
+        },
+    ),
+    (
+        "access.reflected-parameter",
+        {
+            "steps": _steps(
+                "Construire un lien vers le site en plaçant du code dans le paramètre reflété.",
+                "Le faire ouvrir par la victime (e-mail, message, publicité).",
+                "Le script s'exécute dans sa session : lecture des données affichées, actions en son nom.",
+            ),
+            "reveals": "La session d'un visiteur ou d'un collaborateur, détournée depuis un simple lien.",
+            "modifier": 0,
+            "skill": "faible",
+        },
+    ),
+    (
+        "access.path-parameter",
+        {
+            "steps": _steps(
+                "Repérer le paramètre qui désigne un fichier ou une page.",
+                "Tenter un chemin relatif (`../`) ou une ressource hors du répertoire prévu.",
+                "Lire le contenu renvoyé : configuration, code, fichiers d'autres utilisateurs.",
+            ),
+            "reveals": "Des fichiers du serveur que l'application ne prévoyait pas de publier.",
+            "modifier": -1,
+            "skill": "intermédiaire",
+        },
+    ),
+    (
+        "access.sensitive-endpoint",
+        {
+            "steps": _steps(
+                "Relever les chemins d'administration cités par les scripts publics.",
+                "Les demander directement, sans passer par l'interface.",
+                "Vérifier si l'API applique le même contrôle de rôle que l'écran.",
+            ),
+            "reveals": "Des fonctions réservées aux administrateurs, si la protection n'est qu'interface.",
+            "modifier": -1,
+            "skill": "faible",
+        },
+    ),
+    (
+        "access.",
+        {
+            "steps": _steps(
+                "Repérer le paramètre ou l'objet manipulable depuis l'URL.",
+                "Le faire varier vers une ressource qui ne vous appartient pas.",
+                "Vérifier si le serveur applique un contrôle d'autorisation ou se contente de l'interface.",
+            ),
+            "reveals": "Un accès non prévu à des ressources ou des fonctions d'un autre niveau de droits.",
+            "modifier": 1,
+            "skill": "faible",
+        },
+    ),
+    (
         "dns.zone-transfer",
         {
             "steps": _steps(
@@ -488,12 +744,15 @@ def scenario(finding: dict[str, Any], target: str) -> dict[str, Any]:
     steps = [step.replace("{target}", site or "le site").replace("{host}", site or "le site")
              for step in family.get("steps", DEFAULT_FAMILY["steps"])]
 
+    grants = impact.labels(finding_id)
     return {
         "danger": danger,
         "danger_label": danger_label(danger),
         "access": steps,
         "reveals": family.get("reveals", DEFAULT_FAMILY["reveals"]),
         "skill": family.get("skill", "faible"),
+        "grants": grants,
+        "grants_text": " · ".join(grants),
     }
 
 
@@ -525,6 +784,7 @@ def situation_table(findings: list[dict[str, Any]], limit: int = 10) -> list[dic
             "danger_label": item.get("danger_label", ""),
             "access": item.get("access", []),
             "reveals": item.get("reveals", ""),
+            "grants": item.get("grants", []),
             "skill": item.get("skill", ""),
             "remediation": item.get("remediation", ""),
         }

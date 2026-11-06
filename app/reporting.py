@@ -74,7 +74,12 @@ def to_sarif(report: dict[str, Any]) -> dict[str, Any]:
                     ),
                     "danger": finding.get("danger"),
                     "danger-label": finding.get("danger_label", ""),
-                    "tags": ["security", finding.get("category", "web")],
+                    "tags": [
+                        "security",
+                        finding.get("category", "web"),
+                        *([finding["cwe"]] if finding.get("cwe") else []),
+                        *([finding["wstg"]] if finding.get("wstg") else []),
+                    ],
                 },
             }
         )
@@ -105,6 +110,11 @@ def to_sarif(report: dict[str, Any]) -> dict[str, Any]:
                     "category": finding.get("category", ""),
                     "evidence": finding.get("evidence", ""),
                     "remediation": finding.get("remediation", ""),
+                    "access-grants": finding.get("grants", []),
+                    "cwe": finding.get("cwe", ""),
+                    "wstg": finding.get("wstg", ""),
+                    "cvss": finding.get("cvss", 0.0),
+                    "cvss-vector": finding.get("cvss_vector", ""),
                 },
             }
         )
@@ -136,8 +146,12 @@ def to_sarif(report: dict[str, Any]) -> dict[str, Any]:
                     "profile": report.get("profile", "quick"),
                     "riskLevel": (report.get("executive") or {}).get("risk_level", ""),
                     "domainVerified": bool(report.get("verified")),
+                    "reachable": (report.get("executive") or {}).get("reachable", []),
                     "pagesAnalyzed": len(report.get("pages") or []),
                     "pages": [page.get("url") for page in (report.get("pages") or [])],
+                    "authUsed": bool(report.get("auth_used")),
+                    "authKind": report.get("auth_kind", ""),
+                    "requests": report.get("requests_summary") or {},
                 },
             }
         ],
@@ -181,6 +195,10 @@ def to_markdown(report: dict[str, Any]) -> str:
         if executive.get("strengths"):
             lines.append("### Ce qui tient déjà")
             lines += [f"- {item}" for item in executive["strengths"]]
+            lines.append("")
+        if executive.get("reachable"):
+            lines.append("### Ce que l'attaquant peut atteindre")
+            lines += [f"- {item}" for item in executive["reachable"]]
             lines.append("")
 
     plan = remediation.build_plan(report)
@@ -226,6 +244,8 @@ def to_markdown(report: dict[str, Any]) -> str:
             lines += [f"{step_index}. {step}" for step_index, step in enumerate(item["access"], start=1)]
             lines.append("")
             lines.append(f"**Ce que ça révèle :** {item['reveals']}")
+            if item.get("grants"):
+                lines.append(f"**Donne accès à :** {' · '.join(item['grants'])}")
             lines.append(f"**Correction :** {item['remediation']}")
             lines.append("")
 
@@ -233,13 +253,23 @@ def to_markdown(report: dict[str, Any]) -> str:
     if not findings:
         lines.append("Aucun problème détecté par les contrôles passifs. 🎉")
     for index, finding in enumerate(findings, start=1):
+        reference_line = " · ".join(
+            part
+            for part in (
+                finding.get("cwe", ""),
+                finding.get("wstg", ""),
+                f"CVSS {finding['cvss']}" if finding.get("cvss") else "",
+            )
+            if part
+        )
         lines += [
             f"## {index}. [{finding.get('severity_label', finding['severity'])}] {finding['title']}",
             f"_{finding.get('category', '')}_",
-            "",
-            finding.get("description", ""),
-            "",
         ]
+        if reference_line:
+            vector = finding.get("cvss_vector", "")
+            lines.append(f"`{reference_line}`" + (f" `{vector}`" if vector else ""))
+        lines += ["", finding.get("description", ""), ""]
         if finding.get("access"):
             lines.append(
                 f"**Comment y arriver** (danger {finding.get('danger', '?')}/10, "
@@ -249,12 +279,46 @@ def to_markdown(report: dict[str, Any]) -> str:
             lines.append("")
         if finding.get("reveals"):
             lines += [f"**Ce que ça révèle :** {finding['reveals']}", ""]
+        if finding.get("grants"):
+            lines += [f"**Donne accès à :** {' · '.join(finding['grants'])}", ""]
         if finding.get("evidence"):
             lines += ["```", finding["evidence"], "```", ""]
         if finding.get("remediation"):
             lines += [f"**Remédiation :** {finding['remediation']}", ""]
         if finding.get("reference"):
             lines += [f"Référence : {finding['reference']}", ""]
+
+    summary = report.get("requests_summary") or {}
+    if summary.get("total"):
+        lines += ["## Annexe — requêtes effectuées", ""]
+        methods = ", ".join(f"{count} {method}" for method, count in summary.get("by_method", {}).items())
+        lines.append(
+            f"- **{summary['total']} requête(s)** émises ({methods}), "
+            f"{summary.get('blocked', 0)} bloquée(s) par le garde-fou SSRF."
+        )
+        lines.append(
+            "- Aucune méthode d'écriture (POST, PUT, PATCH, DELETE) : "
+            + ("confirmé." if summary.get("read_only") else "**à vérifier**.")
+        )
+        hosts = ", ".join(f"{host} ({count})" for host, count in summary.get("by_host", {}).items())
+        if hosts:
+            lines.append(f"- Hôtes contactés : {hosts}.")
+        if report.get("auth_used"):
+            lines.append(
+                f"- Scan authentifié ({report.get('auth_kind', 'en-tête')}) : l'en-tête n'est "
+                "envoyé qu'à l'hôte analysé et n'est jamais écrit dans ce rapport."
+            )
+        lines.append("")
+        sample = report.get("requests") or []
+        if sample:
+            lines += ["| Méthode | URL | Statut | Durée |", "|---|---|---|---|"]
+            lines += [
+                f"| {entry['method']} | `{entry['url']}` | {entry['status']} | {entry['ms']} ms |"
+                for entry in sample[:40]
+            ]
+            if len(sample) > 40:
+                lines.append(f"| … | {len(sample) - 40} requête(s) supplémentaire(s) | | |")
+            lines.append("")
 
     lines += ["---", "Généré par VulnLens — tests de sécurité autorisés uniquement."]
     return "\n".join(lines)
@@ -358,6 +422,20 @@ def to_html(report: dict[str, Any]) -> str:
         severity = finding.get("severity", "info")
         color = SEVERITY_COLORS.get(severity, "#5b6b7f")
         reference = finding.get("reference") or ""
+        standard_line = " · ".join(
+            part
+            for part in (
+                finding.get("cwe", ""),
+                finding.get("wstg", ""),
+                f"CVSS {finding['cvss']}" if finding.get("cvss") else "",
+            )
+            if part
+        )
+        standard_html = (
+            f'<span class="std" title="{_e(finding.get("cvss_vector", ""))}">{_e(standard_line)}</span>'
+            if standard_line
+            else ""
+        )
         findings_html.append(
             f"""
         <article class="finding" style="border-left-color:{color}">
@@ -367,17 +445,62 @@ def to_html(report: dict[str, Any]) -> str:
             </span>
             <h3>{_e(finding["title"])}</h3>
             <span class="cat">{_e(finding.get("category", ""))}</span>
+            {standard_html}
             {f'<span class="conf">{_e("à vérifier" if finding.get("confidence") == "probable" else "à confirmer")}</span>' if finding.get("confidence") not in (None, "certain") else ""}
           </header>
           <p class="desc">{_e(finding.get("description", ""))}</p>
           {f'''<div class="find-danger">{_danger_meter(finding.get("danger", 0), finding.get("danger_label", ""))}</div>
           <div class="block"><h4>Comment y arriver</h4><ol class="sit-steps">{"".join(f"<li>{_e(step)}</li>" for step in finding.get("access") or [])}</ol></div>
-          <div class="block"><h4>Ce que ça révèle</h4><p class="sit-reveals">{_e(finding.get("reveals", ""))}</p></div>''' if finding.get("danger") else ""}
+          <div class="block"><h4>Ce que ça révèle</h4><p class="sit-reveals">{_e(finding.get("reveals", ""))}</p>{f'<p class="sit-grants"><strong>Donne accès à :</strong> {_e(" · ".join(finding["grants"]))}</p>' if finding.get("grants") else ""}</div>''' if finding.get("danger") else ""}
           <div class="block"><h4>Preuve</h4><pre>{_e(finding.get("evidence") or "—")}</pre></div>
           <div class="block fix"><h4>Remédiation</h4><p>{_e(finding.get("remediation") or "—")}</p></div>
           {f'<a class="ref" href="{_e(reference)}">Documentation ↗</a>' if reference else ''}
         </article>"""
         )
+
+    summary = report.get("requests_summary") or {}
+    requests_html = ""
+    if summary.get("total"):
+        methods = ", ".join(
+            f"{count} {method}" for method, count in (summary.get("by_method") or {}).items()
+        )
+        hosts = ", ".join(
+            f"{host} ({count})" for host, count in (summary.get("by_host") or {}).items()
+        )
+        rows = "".join(
+            f"<tr><td>{_e(entry.get('method', ''))}</td><td><code>{_e(entry.get('url', ''))}</code></td>"
+            f"<td>{entry.get('status', '')}</td><td>{entry.get('ms', '')} ms</td></tr>"
+            for entry in (report.get("requests") or [])[:120]
+        )
+        auth_line = (
+            f"<li>Scan authentifié ({_e(report.get('auth_kind', 'en-tête'))}) : l'en-tête n'est "
+            "envoyé qu'à l'hôte analysé et n'est jamais écrit dans ce rapport.</li>"
+            if report.get("auth_used")
+            else ""
+        )
+        read_only = (
+            "<li class=\"ok\">Aucune méthode d'écriture (POST, PUT, PATCH, DELETE) : confirmé.</li>"
+            if summary.get("read_only")
+            else "<li class=\"warn\">Des méthodes autres que la lecture ont été utilisées : vérifiez le journal.</li>"
+        )
+        requests_html = f"""
+  <h2>Annexe — requêtes effectuées</h2>
+  <div class="panel">
+    <p class="meta">Preuve de non-intrusivité : voici tout le trafic émis pendant l'analyse.</p>
+    <ul class="req-summary">
+      <li><strong>{summary.get('total', 0)}</strong> requête(s) : {_e(methods)}</li>
+      <li>{summary.get('blocked', 0)} tentative(s) bloquée(s) par le garde-fou SSRF</li>
+      {read_only}
+      {f'<li>Hôtes contactés : {_e(hosts)}</li>' if hosts else ''}
+      {auth_line}
+    </ul>
+    <details>
+      <summary>Journal détaillé ({len(report.get('requests') or [])} entrées)</summary>
+      <table><thead><tr><th>Méthode</th><th>URL</th><th>Statut</th><th>Durée</th></tr></thead>
+      <tbody>{rows}</tbody></table>
+    </details>
+  </div>
+"""
 
     fingerprint_html = "".join(
         f"<tr><th>{_e(key.replace('_', ' '))}</th><td>{_e(value)}</td></tr>"
@@ -457,6 +580,14 @@ def to_html(report: dict[str, Any]) -> str:
         )
         strengths = "".join(f"<li>{_e(item)}</li>" for item in executive.get("strengths", []))
         radar_svg = _radar_svg(executive.get("radar") or [])
+        reachable = executive.get("reachable") or []
+        reach_html = (
+            "<h4>Ce que l'attaquant peut atteindre</h4><ul class=\"reach-list\">"
+            + "".join(f"<li>{_e(asset)}</li>" for asset in reachable)
+            + "</ul>"
+            if reachable
+            else ""
+        )
         executive_html = f'''
   <h2>Synthèse</h2>
   <div class="panel exec">
@@ -466,6 +597,7 @@ def to_html(report: dict[str, Any]) -> str:
       <p class="exec-paragraph">{_e(executive.get("paragraph"))}</p>
       <h4>Ce qui expose le plus</h4>
       <ul class="exec-risks">{risks or "<li>Aucun risque majeur détecté.</li>"}</ul>
+      {reach_html}
       <h4>Ce qui tient déjà</h4>
       <ul class="exec-strengths">{strengths or "<li>Pas encore d'élément solide à mettre en avant.</li>"}</ul>
     </div>
@@ -484,6 +616,7 @@ def to_html(report: dict[str, Any]) -> str:
           <p class="sit-cat">{_e(item["category"])} · {_e(item["severity_label"])} · compétence {_e(item["skill"])}</p>
           <h4>Comment y arriver</h4><ol class="sit-steps">{steps}</ol>
           <h4>Ce que ça révèle</h4><p class="sit-reveals">{_e(item["reveals"])}</p>
+          {f'<p class="sit-grants"><strong>Donne accès à :</strong> {_e(" · ".join(item["grants"]))}</p>' if item.get("grants") else ""}
           <p class="sit-fix"><strong>Correction :</strong> {_e(item["remediation"])}</p>
         </article>'''
             )
@@ -600,6 +733,18 @@ def to_html(report: dict[str, Any]) -> str:
   .sit-steps {{ margin:0; padding-left:18px; font-size:12.5px; color:#334155; }}
   .sit-steps li {{ margin:4px 0; }}
   .sit-reveals {{ margin:0; font-size:12.5px; color:#334155; }}
+  .sit-grants {{ margin:6px 0 0; font-size:12.5px; color:#0b4f6c; }}
+  .std {{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; font-weight:600;
+         color:#0b4f6c; background:#eef7fb; border:1px solid #cfe6f0; border-radius:4px;
+         padding:2px 6px; white-space:nowrap; }}
+  .req-summary {{ margin:6px 0 10px; padding-left:18px; font-size:12.5px; color:#334155; }}
+  .req-summary .ok {{ color:#0f766e; font-weight:600; }}
+  .req-summary .warn {{ color:#b45309; font-weight:600; }}
+  details summary {{ cursor:pointer; font-size:12.5px; font-weight:600; color:#0b4f6c; }}
+  details table {{ margin-top:8px; }}
+  .reach-list {{ list-style:none; padding:0; margin:4px 0 0; display:flex; flex-wrap:wrap; gap:6px; }}
+  .reach-list li {{ background:#e6f4fa; border:1px solid #b6dced; color:#0b4f6c;
+                    border-radius:999px; padding:2px 9px; font-size:11.5px; font-weight:600; }}
   .sit-fix {{ margin:8px 0 0; font-size:12px; color:#14532d; }}
   .find-danger {{ margin:12px 0 0; }}
   .danger {{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:11px; color:var(--muted); }}
@@ -697,6 +842,7 @@ def to_html(report: dict[str, Any]) -> str:
   <h2>Constats ({len(findings)})</h2>
   {''.join(findings_html) if findings_html else '<div class="panel">Aucun problème détecté par les contrôles passifs.</div>'}
 
+  {requests_html}
   <h2>Empreinte technique</h2>
   <table>{fingerprint_html or '<tr><td>Aucune donnée collectée.</td></tr>'}</table>
 

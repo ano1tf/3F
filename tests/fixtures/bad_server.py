@@ -24,7 +24,12 @@ INDEX_HTML = """<!doctype html>
     <button type="submit">Connexion</button>
   </form>
   <iframe src="https://video.test/embed"></iframe>
+  <script src="/static/jquery-3.4.1.min.js"></script>
   <script src="/static/app.js"></script>
+  <a href="/compte">Mon espace</a>
+  <a href="/users/42">Mon compte</a>
+  <a href="/factures/1024">Mes factures</a>
+  <a href="/recherche?q=vulnlens">Recherche</a>
   <a href="/about">À propos</a>
   <a href="/contact">Contact</a>
   <a href="/logout">Déconnexion</a>
@@ -49,6 +54,7 @@ class BadSiteHandler(BaseHTTPRequestHandler):
             "Content-Security-Policy", "default-src *; script-src 'unsafe-inline' http: *"
         )
         self.send_header("X-Powered-By", "PHP/7.4.3")
+        self.send_header("X-Debug-Token", "a1b2c3")
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(payload)
@@ -64,7 +70,14 @@ class BadSiteHandler(BaseHTTPRequestHandler):
             self._send(
                 200,
                 "const CFG={region:'eu-west-1',key:'AKIAZ7Q2XK4M9PLW3TRV'};\n"
-                "window.API='https://api.test.local/v1';\n",
+                "window.API='https://api.test.local/v1';\n"
+                "fetch('/admin/users').then(r => r.json());\n",
+                "application/javascript",
+            )
+        elif path == "/static/jquery-3.4.1.min.js":
+            self._send(
+                200,
+                "/*! jQuery v3.4.1 | (c) JS Foundation */\n!function(a,b){}(window,document);\n",
                 "application/javascript",
             )
         elif path == "/static/app.js.map":
@@ -82,6 +95,72 @@ class BadSiteHandler(BaseHTTPRequestHandler):
                   <input type="text" name="email">
                   <input type="password" name="secret">
                 </form></body></html>""",
+            )
+        elif path == "/compte":
+            # Zone « authentifiée » : 200 seulement avec le jeton de test.
+            if self.headers.get("Authorization") == "Bearer test-token":
+                self._send(
+                    200,
+                    "<html><head><title>Mon espace</title></head><body>"
+                    "Bienvenue Jean — commande 1024</body></html>",
+                )
+            else:
+                self._send(401, "<html><body>Authentification requise</body></html>")
+        elif path == "/redirection-externe":
+            # Redirection vers un hôte fourni : sert à vérifier qu'un en-tête
+            # d'authentification ne suit pas un saut vers un domaine tiers.
+            from urllib.parse import parse_qs, urlparse
+
+            cible = parse_qs(urlparse(self.path).query).get("vers", [""])[0]
+            if cible.startswith("http://127.0.0.1:"):
+                self.send_response(302)
+                self.send_header("Location", cible)
+                self.end_headers()
+            else:
+                self._send(400, "<html><body>cible refusée</body></html>")
+        elif path == "/echo-headers":
+            self._send(
+                200,
+                "<html><body>Authorization="
+                + (self.headers.get("Authorization") or "absente")
+                + "</body></html>",
+            )
+        elif path == "/users/42":
+            self._send(
+                200,
+                """<html><head><title>Mon compte</title></head><body>
+                <form action="/profil" method="post">
+                  <input type="hidden" name="user_id" value="42">
+                  <input type="email" name="email" value="jean@test.local">
+                </form></body></html>""",
+            )
+        elif path == "/factures/1024":
+            self._send(
+                200,
+                "<html><head><title>Facture 1024</title></head>"
+                "<body>Facture n°1024 — 149,00 €</body></html>",
+            )
+        elif path == "/recherche":
+            from urllib.parse import parse_qs
+
+            query = parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "").get("q", [""])[0]
+            self._send(
+                200,
+                "<html><head><title>Recherche</title></head>"
+                f"<body>Résultats pour {query}</body></html>",
+            )
+        elif path == "/terraform.tfstate":
+            self._send(
+                200,
+                '{"terraform_version": "1.6.2", "resources": []}',
+                "application/json",
+            )
+        elif path == "/.ssh/id_rsa":
+            self._send(
+                200,
+                "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA\n"
+                "-----END OPENSSH PRIVATE KEY-----\n",
+                "text/plain",
             )
         elif path == "/.git/HEAD":
             self._send(200, "ref: refs/heads/main\n", "text/plain")

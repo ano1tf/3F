@@ -25,7 +25,7 @@
         </svg>
       </span>
       <span class="brand-name">VulnLens</span>
-      <span class="brand-tag">v6.0</span>
+      <span class="brand-tag">v6.4</span>
     </a>
     <nav class="topnav">
       <button class="nav-btn" id="nav-analyzer" type="button" aria-pressed="true">Analyser</button>
@@ -43,13 +43,15 @@
       </div>
       <h1>La surface d'attaque de votre site,<br /><span class="grad">en un clic.</span></h1>
       <p class="hero-sub">
-        Transport, TLS, en-têtes, secrets, dépendances tierces, e-mail et sous-domaines :
-        un rapport priorisé, une synthèse lisible par votre direction et un plan d'action
-        chiffré en quelques secondes.
+        Transport, TLS, en-têtes, secrets, contrôle d'accès (IDOR), dépendances tierces, e-mail
+        et sous-domaines : un rapport priorisé qui dit <strong>ce que chaque faille donne accès</strong>,
+        une synthèse lisible par votre direction et un plan d'action chiffré en quelques secondes.
       </p>
       <div class="hero-chips" aria-label="Capacités clés">
         <span>Synthèse exécutive</span>
         <span>Chasse aux secrets</span>
+        <span>IDOR &amp; contrôle d'accès</span>
+        <span>Actifs exposés</span>
         <span>Certificate Transparency</span>
         <span>Surveillance planifiée</span>
         <span>100 % passif</span>
@@ -84,7 +86,7 @@
             <input type="radio" name="profile" value="standard" />
             <span class="profile-box">
               <span class="profile-name">Standard</span>
-              <span class="profile-detail">Jusqu'à 6 pages, en-têtes et contenu agrégés</span>
+              <span class="profile-detail">Jusqu'à 8 pages, en-têtes et contenu agrégés</span>
             </span>
           </label>
           <label class="profile-option">
@@ -95,6 +97,17 @@
             </span>
           </label>
         </fieldset>
+
+        <details class="auth-block">
+          <summary>Zone authentifiée (optionnel)</summary>
+          <label class="sr-only" for="auth">En-tête d'authentification</label>
+          <input id="auth" type="password" autocomplete="off" spellcheck="false"
+                 placeholder="Authorization: Bearer … ou Cookie: session=…" />
+          <p class="muted small">
+            Envoyé au seul hôte analysé, jamais enregistré ni inclus dans le rapport.
+            À n'utiliser que sur une cible que vous êtes autorisé à tester.
+          </p>
+        </details>
 
         <p id="target-hint" class="hint">
           Domaine ou URL complète. L'outil refuse les adresses internes (localhost, 10.x, 192.168.x).
@@ -190,6 +203,10 @@
                 <h3>Ce qui tient déjà</h3>
                 <ul class="exec-strengths" id="exec-strengths"></ul>
               </div>
+            </div>
+            <div class="exec-reach" id="exec-reach" hidden>
+              <h3>Ce que l'attaquant peut atteindre</h3>
+              <ul class="reach-list" id="exec-reachable"></ul>
             </div>
           </div>
           <div class="exec-radar">
@@ -296,6 +313,22 @@
           <ul class="checks" id="checks"></ul>
         </article>
       </div>
+
+      <article class="panel" id="requests-panel" data-tab="technique" hidden>
+        <div class="panel-head">
+          <h2>Journal des requêtes</h2>
+          <span class="muted small" id="requests-total"></span>
+        </div>
+        <p class="muted small">
+          Preuve de non-intrusivité : tout le trafic émis pendant l'analyse, méthode par méthode.
+          L'export HTML et le Markdown contiennent le journal détaillé (annexe du rapport).
+        </p>
+        <ul class="req-summary" id="requests-summary"></ul>
+        <details id="requests-details" hidden>
+          <summary>Journal détaillé</summary>
+          <div class="req-log mono" id="request-log"></div>
+        </details>
+      </article>
 
       <article class="panel" id="pages-panel" data-tab="technique" hidden>
         <div class="panel-head">
@@ -453,6 +486,7 @@
           <span class="finding-title"></span>
           <span class="finding-cat"></span>
         </span>
+        <span class="std-chip" hidden></span>
         <span class="confidence" hidden></span>
         <span class="danger-chip" hidden></span>
         <span class="sev-badge"></span>
@@ -469,6 +503,10 @@
         <div class="block">
           <h3>Ce que ça révèle</h3>
           <p class="reveals"></p>
+        </div>
+        <div class="block grants-block" hidden>
+          <h3>Donne accès à</h3>
+          <ul class="grants"></ul>
         </div>
         <div class="block">
           <h3>Preuve</h3>

@@ -9,16 +9,18 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from urllib.parse import urlsplit, urlunsplit
 
-from .. import attack, config, narrative, verify
+from .. import attack, config, credentials, narrative, standards, verify
 from ..models import CheckResult, Finding, ScanReport
 from ..safety import ScanError, validate_target
 from . import (
+    checks_access,
     checks_content,
     checks_deep,
     checks_dns,
     checks_email,
     checks_exposure,
     checks_http,
+    checks_libs,
     checks_secrets,
     checks_thirdparty,
     checks_tls,
@@ -40,7 +42,7 @@ Emitter = Callable[[dict], Awaitable[None]]
 
 PROFILES: dict[str, dict] = {
     "quick": {"pages": 1, "deep": False, "scripts": 3, "email": False, "label": "Rapide"},
-    "standard": {"pages": 6, "deep": False, "scripts": 6, "email": True, "label": "Standard"},
+    "standard": {"pages": 8, "deep": False, "scripts": 8, "email": True, "label": "Standard"},
     "deep": {"pages": 12, "deep": True, "scripts": 10, "email": True, "label": "Approfondi"},
 }
 
@@ -56,6 +58,8 @@ STEPS = [
     ("content", "Analyse du contenu et des formulaires"),
     ("surface", "Cartographie des dépendances tierces"),
     ("secrets", "Recherche de secrets dans les scripts"),
+    ("access", "Contrôle d'accès : IDOR, privilèges, paramètres"),
+    ("libs", "Bibliothèques front-end et versions corrigées"),
     ("deep", "Contrôles approfondis (AXFR, sous-domaines, redirections)"),
     ("score", "Calcul du score et du rapport"),
 ]
@@ -81,7 +85,14 @@ async def run_scan(
     raw_target: str,
     emit: Emitter,
     profile: str = "quick",
+    auth: tuple[str, str] | None = None,
 ) -> ScanReport:
+    """Analyse une cible de façon passive.
+
+    `auth` : couple (nom d'en-tête, valeur) fourni par le pentester pour couvrir
+    la zone authentifiée. Il n'est envoyé qu'à l'hôte analysé et n'apparaît
+    jamais dans le rapport (seul `auth_used` / `auth_kind` sont conservés).
+    """
     started = time.perf_counter()
     selected = PROFILES.get(profile, PROFILES["quick"])
     report = ScanReport(
@@ -124,7 +135,15 @@ async def run_scan(
     findings: list[Finding] = []
     checks: list[CheckResult] = []
 
-    async with Fetcher(allow_private=config.ALLOW_PRIVATE_TARGETS) as fetcher:
+    report.auth_used = auth is not None
+    if auth is not None:
+        report.auth_kind = credentials.kind_for(*auth)
+
+    async with Fetcher(
+        allow_private=config.ALLOW_PRIVATE_TARGETS,
+        auth=auth,
+        auth_host=urlsplit(target.url).netloc,
+    ) as fetcher:
         # ------------------------------------------------------------------
         # Phase 1 — transport
         # ------------------------------------------------------------------
@@ -367,6 +386,7 @@ async def run_scan(
             )
 
         await advance("secrets", 88, "Recherche de secrets dans les scripts publics")
+        fetched_scripts: list[tuple[str, str]] = []
         scripts: list[str] = []
         for page in pages:
             scripts.extend(checks_content.parse_page(page.response.text).scripts)
@@ -377,6 +397,7 @@ async def run_scan(
                 scripts,
                 inline_html=response.text,
                 limit=int(selected.get("scripts", 6)),
+                collected=fetched_scripts,
             )
             report.fingerprint.update(secret_meta)
             findings.extend(secret_findings)
@@ -391,6 +412,58 @@ async def run_scan(
         except Exception as exc:  # noqa: BLE001
             checks.append(
                 CheckResult("secrets", "Secrets & scripts", status="error", detail=f"Phase interrompue : {exc}")
+            )
+
+        # ------------------------------------------------------------------
+        # Phase 5 quater — contrôle d'accès (100 % passif)
+        # ------------------------------------------------------------------
+        await advance("access", 89, "Contrôle d'accès : IDOR, privilèges et paramètres")
+        try:
+            access_findings = checks_access.inspect(
+                [(page.url, page.response.text) for page in pages],
+                fetched_scripts,
+            )
+            findings.extend(access_findings)
+            checks.append(
+                CheckResult(
+                    "access",
+                    "Contrôle d'accès",
+                    detail=f"{len(access_findings)} piste(s) d'escalade",
+                    findings=access_findings,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            checks.append(
+                CheckResult(
+                    "access", "Contrôle d'accès", status="error", detail=f"Phase interrompue : {exc}"
+                )
+            )
+
+        # ------------------------------------------------------------------
+        # Phase 5 ter — bibliothèques front-end obsolètes (CVE connues)
+        # ------------------------------------------------------------------
+        await advance("libs", 90, "Comparaison des bibliothèques front-end aux versions corrigées")
+        try:
+            lib_findings, lib_meta = checks_libs.detect_libraries(
+                [(page.url, page.response.text) for page in pages],
+                fetched_scripts,
+            )
+            report.fingerprint.update(lib_meta)
+            findings.extend(lib_findings)
+            if lib_findings:
+                detail = f"{len(lib_findings)} bibliothèque(s) obsolète(s)"
+            elif lib_meta.get("bibliotheques"):
+                detail = f"à jour : {lib_meta['bibliotheques']}"
+            else:
+                detail = "aucune bibliothèque versionnée détectée"
+            checks.append(
+                CheckResult("libs", "Bibliothèques front-end", detail=detail, findings=lib_findings)
+            )
+        except Exception as exc:  # noqa: BLE001
+            checks.append(
+                CheckResult(
+                    "libs", "Bibliothèques front-end", status="error", detail=f"Phase interrompue : {exc}"
+                )
             )
 
         headers_map = {k.lower(): v for k, v in response.headers.items()}
@@ -440,7 +513,10 @@ async def run_scan(
         report.counts = count_by_severity(report.findings)
         report.checks = checks
         for finding in report.findings:
-            finding.confidence = narrative.confidence_for(finding.id)
+            # Un contrôle peut déjà avoir qualifié sa certitude (IDOR non testé, version
+            # devinée dans un bundle) : on ne l'écrase pas par la valeur par défaut.
+            if finding.confidence == "certain":
+                finding.confidence = narrative.confidence_for(finding.id)
         enriched = attack.annotate([f.to_dict() for f in report.findings], report.final_url or target.url)
         for finding, data in zip(report.findings, enriched, strict=False):
             finding.danger = data["danger"]
@@ -448,6 +524,17 @@ async def run_scan(
             finding.access = data["access"]
             finding.reveals = data["reveals"]
             finding.skill = data["skill"]
+            finding.grants = data.get("grants", [])
+            finding.grants_text = data.get("grants_text", "")
+            standard = standards.for_finding(finding.id)
+            if standard is not None:
+                finding.cwe = standard.cwe
+                finding.cwe_name = standard.cwe_name
+                finding.wstg = standard.wstg
+                finding.cvss = standard.cvss
+                finding.cvss_vector = standard.vector
+        report.requests = list(fetcher.log)
+        report.requests_summary = fetcher.summary()
         report.duration_ms = int((time.perf_counter() - started) * 1000)
         report.executive = narrative.build(report.to_dict())
 
